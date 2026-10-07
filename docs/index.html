@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Milwaukee Job Access</title>
+  <meta name="description" content="Jobs reachable within 45 minutes by walking and transit from every inhabited census block in Milwaukee County, by time of day.">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <style>
+    :root {
+      --ink: #1a1a19; --ink-2: #5e5e5a; --ink-3: #8a8a85;
+      --surface: #fcfcfb; --surface-2: #f3f2ee; --border: #d9d8d3;
+      --accent: #1c5cab; --panel-shadow: 0 2px 12px rgba(0,0,0,.12);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ink: #ecebe6; --ink-2: #b4b3ad; --ink-3: #85847f;
+        --surface: #1a1a19; --surface-2: #242423; --border: #3a3a38;
+        --accent: #6da7ec; --panel-shadow: 0 2px 12px rgba(0,0,0,.5);
+      }
+    }
+    :root[data-theme="dark"] {
+      --ink: #ecebe6; --ink-2: #b4b3ad; --ink-3: #85847f;
+      --surface: #1a1a19; --surface-2: #242423; --border: #3a3a38;
+      --accent: #6da7ec; --panel-shadow: 0 2px 12px rgba(0,0,0,.5);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--surface); color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #map { position: absolute; inset: 0; }
+    #panel { position: absolute; top: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px);
+      max-height: calc(100vh - 24px); overflow: auto; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 18px; box-shadow: var(--panel-shadow); }
+    h1 { margin: 0; font-size: 19px; line-height: 1.25; }
+    .sub { margin: 4px 0 12px; color: var(--ink-2); font-size: 13px; }
+    fieldset { border: 0; padding: 0; margin: 0 0 10px; }
+    legend { font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+    .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .opts label { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 13px; cursor: pointer;
+      background: var(--surface-2); }
+    .opts input { display: none; }
+    .opts input:checked + span { color: var(--surface); }
+    .opts label:has(input:checked) { background: var(--accent); border-color: var(--accent); }
+    #legend { margin: 10px 0 4px; }
+    #legend .bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+    #legend .bar span { flex: 1; }
+    #legend .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 3px; }
+    #legend .cap { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+    .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+    .tile { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
+    .tile b { display: block; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+    .tile span { font-size: 11.5px; color: var(--ink-2); }
+    details { margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+    details p { margin: 6px 0; }
+    summary { cursor: pointer; color: var(--ink); }
+    a { color: var(--accent); }
+    .tip { position: absolute; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 10px; font-size: 12.5px; box-shadow: var(--panel-shadow); max-width: 240px; display: none; }
+    .tip table { border-collapse: collapse; margin-top: 4px; }
+    .tip td { padding: 1px 6px 1px 0; color: var(--ink-2); }
+    .tip td:last-child { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .tip tr.cur td { font-weight: 600; }
+    @media (max-width: 520px) {
+      #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-width: none; border-radius: 10px 10px 0 0; max-height: 55vh; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="tip" id="tip"></div>
+  <aside id="panel">
+    <h1>Where can Milwaukee get to work?</h1>
+    <p class="sub">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
+    <fieldset>
+      <legend>Leaving</legend>
+      <div class="opts" id="scenarios"></div>
+    </fieldset>
+    <div id="legend"></div>
+    <div class="tiles" id="tiles"></div>
+    <details>
+      <summary>How this was made</summary>
+      <p>Travel times come from <a href="https://github.com/FrankBStack/Timeshed">Timeshed</a>, an own RAPTOR implementation over the
+      MCTS GTFS schedule joined to an OpenStreetMap walking graph. Each block's value is the mean over departures every 10 minutes
+      across the two-hour window. Jobs are 2023 LODES workplace counts by block; blocks are 2020 TIGER.</p>
+      <p>Hover a block for its numbers. The "night as share of morning" view divides the late-night value by the morning one.</p>
+    </details>
+  </aside>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script>
+    const BLUES = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
+    const ORANGES = ['#fbe4d8', '#f7bda2', '#f29568', '#eb6834', '#c04e21', '#8c3815'];
+    const VIEWS = [
+      { key: 'jobs_weekday_am', label: 'Weekday 7–9 am', breaks: [25000, 50000, 100000, 150000, 200000, 300000], ramp: BLUES, fmt: k => k >= 1000 ? (k / 1000) + 'k' : k, cap: 'Jobs reachable within 45 min' },
+      { key: 'jobs_weekday_midday', label: 'Weekday noon–2 pm', breaks: [25000, 50000, 100000, 150000, 200000, 300000], ramp: BLUES, fmt: k => k >= 1000 ? (k / 1000) + 'k' : k, cap: 'Jobs reachable within 45 min' },
+      { key: 'jobs_weekday_night', label: 'Weekday 10 pm–midnight', breaks: [25000, 50000, 100000, 150000, 200000, 300000], ramp: BLUES, fmt: k => k >= 1000 ? (k / 1000) + 'k' : k, cap: 'Jobs reachable within 45 min' },
+      { key: 'jobs_weekday_owl', label: 'Weekday midnight–2 am', breaks: [25000, 50000, 100000, 150000, 200000, 300000], ramp: BLUES, fmt: k => k >= 1000 ? (k / 1000) + 'k' : k, cap: 'Jobs reachable within 45 min' },
+      { key: 'jobs_sunday_am', label: 'Sunday 7–9 am', breaks: [25000, 50000, 100000, 150000, 200000, 300000], ramp: BLUES, fmt: k => k >= 1000 ? (k / 1000) + 'k' : k, cap: 'Jobs reachable within 45 min' },
+      { key: 'weekday_night_over_am', label: '10 pm as share of 8 am', breaks: [0.1, 0.25, 0.5, 0.75, 0.9], ramp: ORANGES, fmt: v => Math.round(v * 100) + '%', cap: 'Late-night access ÷ morning access' },
+      { key: 'weekday_owl_over_am', label: 'After midnight as share of 8 am', breaks: [0.1, 0.25, 0.5, 0.75, 0.9], ramp: ORANGES, fmt: v => Math.round(v * 100) + '%', cap: 'After-midnight access ÷ morning access' },
+    ];
+    const JOB_VIEWS = VIEWS.filter(v => v.key.startsWith('jobs_'));
+    const $ = id => document.getElementById(id);
+    let current = VIEWS[0];
+
+    function stepExpr(v) {
+      const e = ['step', ['coalesce', ['get', v.key], -1], 'rgba(0,0,0,0)', 0, v.ramp[0]];
+      v.breaks.forEach((b, i) => e.push(b, v.ramp[i + 1]));
+      return e;
+    }
+    function legend(v) {
+      const bar = v.ramp.map(c => `<span style="background:${c}"></span>`).join('');
+      const ticks = ['0', ...v.breaks.map(v.fmt)].map(t => `<span>${t}</span>`).join('');
+      $('legend').innerHTML = `<div class="bar">${bar}</div><div class="ticks">${ticks}</div><div class="cap">${v.cap}</div>`;
+    }
+    function fmtInt(n) { return Math.round(n).toLocaleString(); }
+
+    fetch('data/summary.json').then(r => r.json()).then(s => {
+      const am = s.scenarios.weekday_am, night = s.scenarios.weekday_night, owl = s.scenarios.weekday_owl;
+      const tiles = [
+        [fmtInt(am.median), 'jobs within reach of the median resident, weekday 7–9 am'],
+        [fmtInt(night.median), 'same budget, leaving 10 pm–midnight'],
+        [owl ? fmtInt(owl.median) : '–', 'leaving midnight–2 am'],
+        [Math.round((s.owl_vs_am || s.night_vs_am).share_losing_half * 100) + '%', 'of residents lose more than half their access after midnight'],
+      ];
+      $('tiles').innerHTML = tiles.map(([b, t]) => `<div class="tile"><b>${b}</b><span>${t}</span></div>`).join('');
+    }).catch(() => {});
+
+    const map = new maplibregl.Map({
+      container: 'map', style: 'https://tiles.openfreemap.org/styles/positron',
+      center: [-87.95, 43.03], zoom: 10.6, attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+    const radios = $('scenarios');
+    VIEWS.forEach((v, i) => {
+      const l = document.createElement('label');
+      l.innerHTML = `<input type="radio" name="view" value="${i}" ${i === 0 ? 'checked' : ''}><span>${v.label}</span>`;
+      radios.appendChild(l);
+    });
+    radios.addEventListener('change', e => {
+      current = VIEWS[+e.target.value];
+      map.setPaintProperty('blocks', 'fill-color', stepExpr(current));
+      legend(current);
+    });
+    legend(current);
+
+    map.on('load', () => {
+      map.addSource('blocks', { type: 'geojson', data: 'data/blocks.geojson', promoteId: 'id' });
+      const before = (map.getStyle().layers.find(l => l.type === 'symbol') || {}).id;
+      map.addLayer({ id: 'blocks', type: 'fill', source: 'blocks',
+        paint: { 'fill-color': stepExpr(current), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.72] } }, before);
+      map.addLayer({ id: 'blocks-line', type: 'line', source: 'blocks',
+        paint: { 'line-color': '#fcfcfb', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0, 13, 0.5], 'line-opacity': 0.6 } }, before);
+
+      let hovered = null;
+      const tip = $('tip');
+      map.on('mousemove', 'blocks', e => {
+        const f = e.features[0];
+        if (hovered !== null && hovered !== f.id) map.setFeatureState({ source: 'blocks', id: hovered }, { hover: false });
+        hovered = f.id;
+        map.setFeatureState({ source: 'blocks', id: hovered }, { hover: true });
+        map.getCanvas().style.cursor = 'crosshair';
+        const p = f.properties;
+        const rows = JOB_VIEWS.map(v => `<tr class="${v.key === current.key ? 'cur' : ''}"><td>${v.label}</td><td>${fmtInt(p[v.key])}</td></tr>`).join('');
+        const pct = v => v == null ? '–' : Math.round(v * 100) + '%';
+        tip.innerHTML = `<div>Block ${p.id}<br><span style="color:var(--ink-2)">${fmtInt(p.pop)} residents · ${fmtInt(p.jobs_here)} jobs here</span></div>
+          <table>${rows}
+          <tr class="${current.key === 'weekday_night_over_am' ? 'cur' : ''}"><td>10 pm ÷ 8 am</td><td>${pct(p.weekday_night_over_am)}</td></tr>
+          <tr class="${current.key === 'weekday_owl_over_am' ? 'cur' : ''}"><td>After midnight ÷ 8 am</td><td>${pct(p.weekday_owl_over_am)}</td></tr></table>`;
+        tip.style.display = 'block';
+        const x = e.point.x + 14, y = e.point.y + 14;
+        tip.style.left = Math.min(x, window.innerWidth - tip.offsetWidth - 8) + 'px';
+        tip.style.top = Math.min(y, window.innerHeight - tip.offsetHeight - 8) + 'px';
+      });
+      map.on('mouseleave', 'blocks', () => {
+        if (hovered !== null) map.setFeatureState({ source: 'blocks', id: hovered }, { hover: false });
+        hovered = null;
+        map.getCanvas().style.cursor = '';
+        tip.style.display = 'none';
+      });
+    });
+  </script>
+</body>
+</html>
