@@ -176,18 +176,28 @@ impl Timetable {
                 let mut chain: Vec<usize> = Vec::new();
                 let mut rest: Vec<usize> = Vec::new();
                 for i in pending {
-                    let ok = match chain.last() {
-                        None => true,
+                    let overtakes_at = match chain.last() {
+                        None => None,
                         Some(&last) => instances[i]
                             .events
                             .iter()
                             .zip(&instances[last].events)
-                            .all(|(a, b)| a.arr >= b.arr && a.dep >= b.dep),
+                            .position(|(a, b)| a.arr < b.arr || a.dep < b.dep),
                     };
-                    if ok {
-                        chain.push(i);
-                    } else {
-                        rest.push(i);
+                    match overtakes_at {
+                        None => chain.push(i),
+                        Some(pos) => {
+                            let last = *chain.last().unwrap();
+                            log::debug!(
+                                "trip {} overtakes {} at stop {} ({} vs {})",
+                                feed.trips[instances[i].gtfs_trip as usize].id,
+                                feed.trips[instances[last].gtfs_trip as usize].id,
+                                stops[key.1[pos] as usize].gtfs_id,
+                                crate::gtfs::format_time(instances[i].events[pos].arr),
+                                crate::gtfs::format_time(instances[last].events[pos].arr),
+                            );
+                            rest.push(i);
+                        }
                     }
                 }
                 if !first {
