@@ -51,11 +51,10 @@ pub fn is_walkable<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> bool {
             "highway" => highway = Some(v),
             "foot" => foot = Some(v),
             "access" => access = Some(v),
-            "sidewalk" | "sidewalk:both" | "sidewalk:left" | "sidewalk:right" => {
-                if v != "no" && v != "none" {
+            "sidewalk" | "sidewalk:both" | "sidewalk:left" | "sidewalk:right"
+                if v != "no" && v != "none" => {
                     sidewalk = Some(v)
                 }
-            }
             _ => {}
         }
     }
@@ -111,8 +110,8 @@ pub fn read_walk_graph(path: &Path, bbox: BBox) -> Result<WalkGraph> {
     let ways: Vec<Vec<i64>> = reader.par_map_reduce(
         |el| {
             let mut out = Vec::new();
-            if let Element::Way(w) = el {
-                if is_walkable(w.tags()) {
+            if let Element::Way(w) = el
+                && is_walkable(w.tags()) {
                     // A way leaving the box is cut at the box edge: runs of
                     // in-box nodes become separate segments.
                     let mut run: Vec<i64> = Vec::new();
@@ -129,7 +128,6 @@ pub fn read_walk_graph(path: &Path, bbox: BBox) -> Result<WalkGraph> {
                         out.push(run);
                     }
                 }
-            }
             out
         },
         Vec::new,
@@ -156,13 +154,12 @@ pub fn read_walk_graph(path: &Path, bbox: BBox) -> Result<WalkGraph> {
                 osm_id.push(r);
                 (lat.len() - 1) as u32
             });
-            if let Some(p) = prev {
-                if p != n {
+            if let Some(p) = prev
+                && p != n {
                     let d = haversine_m(lat[p as usize], lon[p as usize], lat[n as usize], lon[n as usize]) as f32;
                     edges.push((p, n, d));
                     edges.push((n, p, d));
                 }
-            }
             prev = Some(n);
         }
     }

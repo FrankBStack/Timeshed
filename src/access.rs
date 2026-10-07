@@ -143,7 +143,7 @@ pub fn run(engine: &Engine, origins: &[Origin], dests: &Dests, opts: &AccessOpts
                     rows.push(Row { origin: o.id.clone(), depart, on_network, count, reached });
                 }
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                if n % 500 == 0 || n == total {
+                if n.is_multiple_of(500) || n == total {
                     log::info!("{n}/{total} origins ({:.0?})", t0.elapsed());
                 }
                 rows
