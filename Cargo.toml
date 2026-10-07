@@ -5,13 +5,19 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+axum = "0.8.9"
 bincode = "1"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.7", features = ["derive"] }
+contour = "0.13.1"
 csv = "1.4.0"
 env_logger = "0.11.11"
 log = "0.4.34"
 osmpbf = "0.3.8"
+rayon = "1.12.0"
 rstar = "0.13.0"
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread"] }
+tower-http = { version = "0.7.1", features = ["fs", "cors"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

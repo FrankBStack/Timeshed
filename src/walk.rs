@@ -49,18 +49,14 @@ pub const UNREACHED: u32 = u32::MAX;
 /// queries does not reallocate a node-sized array every time.
 pub struct WalkSearch<'a> {
     g: &'a WalkGraph,
-    /// seconds per meter
-    pace: f64,
     label: Vec<u32>,
     touched: Vec<u32>,
     heap: BinaryHeap<Reverse<(u32, u32)>>,
 }
 
 impl<'a> WalkSearch<'a> {
-    /// `speed_mps` is the walking speed; labels come out in seconds. Use a
-    /// speed of 1.0 to search in meters.
-    pub fn new(g: &'a WalkGraph, speed_mps: f64) -> WalkSearch<'a> {
-        WalkSearch { g, pace: 1.0 / speed_mps, label: vec![UNREACHED; g.node_count()], touched: Vec::new(), heap: BinaryHeap::new() }
+    pub fn new(g: &'a WalkGraph) -> WalkSearch<'a> {
+        WalkSearch { g, label: vec![UNREACHED; g.node_count()], touched: Vec::new(), heap: BinaryHeap::new() }
     }
 
     pub fn reset(&mut self) {
@@ -73,7 +69,8 @@ impl<'a> WalkSearch<'a> {
 
     /// Run from `sources` (node, starting label), never expanding labels
     /// above `limit`. Labels are absolute: they start where the source says.
-    pub fn run(&mut self, sources: impl IntoIterator<Item = (u32, u32)>, limit: u32) {
+    /// `pace` is seconds per meter; pass 1.0 to search in meters.
+    pub fn run(&mut self, sources: impl IntoIterator<Item = (u32, u32)>, limit: u32, pace: f64) {
         self.reset();
         for (n, t) in sources {
             if t <= limit && t < self.label[n as usize] {
@@ -89,7 +86,7 @@ impl<'a> WalkSearch<'a> {
                 continue; // stale entry
             }
             for (m, len) in self.g.neighbours(n) {
-                let t2 = t + (len as f64 * self.pace).round() as u32;
+                let t2 = t + (len as f64 * pace).round() as u32;
                 if t2 <= limit && t2 < self.label[m as usize] {
                     if self.label[m as usize] == UNREACHED {
                         self.touched.push(m);
@@ -150,14 +147,14 @@ mod tests {
     #[test]
     fn bounded_dijkstra() {
         let g = line_graph();
-        let mut s = WalkSearch::new(&g, 1.0);
-        s.run([(0, 0)], 250);
+        let mut s = WalkSearch::new(&g);
+        s.run([(0, 0)], 250, 1.0);
         assert_eq!(s.label(0), Some(0));
         assert_eq!(s.label(2), Some(200));
         assert_eq!(s.label(3), None, "300 m is past the limit");
         assert_eq!(s.reached_count(), 3);
         // multi-source with offsets, and a reused workspace
-        s.run([(4, 1000), (0, 1050)], 10_000);
+        s.run([(4, 1000), (0, 1050)], 10_000, 1.0);
         assert_eq!(s.label(2), Some(1200));
         assert_eq!(s.label(1), Some(1150));
         assert_eq!(s.label(5), None, "unconnected");

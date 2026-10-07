@@ -1,11 +1,10 @@
 //! The routing bundle: timetable + walking graph + the glue between them,
 //! and the door-to-door query that runs on it.
 
-use crate::geo::haversine_m;
 use crate::osm::WalkGraph;
 use crate::raptor::Raptor;
 use crate::timetable::Timetable;
-use crate::walk::{UNREACHED, WalkIndex, WalkSearch};
+use crate::walk::{WalkIndex, WalkSearch};
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -66,14 +65,14 @@ impl Engine {
         // Footpaths: from each stop, walk up to transfer_max_m and record
         // every other stop found on the way.
         let t0 = std::time::Instant::now();
-        let mut search = WalkSearch::new(&walk, 1.0);
+        let mut search = WalkSearch::new(&walk);
         let mut count = 0usize;
         for s in 0..tt.stops.len() {
             let n = stop_node[s];
             if n == u32::MAX {
                 continue;
             }
-            search.run([(n, stop_snap_m[s].round() as u32)], opts.transfer_max_m as u32);
+            search.run([(n, stop_snap_m[s].round() as u32)], opts.transfer_max_m as u32, 1.0);
             let mut out = Vec::new();
             for (node, meters) in search.reached() {
                 if let Some(stops) = node_stops.get(&node) {
@@ -156,17 +155,19 @@ pub struct Query<'a> {
     raptor: Raptor,
     active: Option<(NaiveDate, Vec<bool>)>,
     depart: u32,
+    pace: f64,
     origin: Option<u32>,
 }
 
 impl<'a> Query<'a> {
-    pub fn new(engine: &'a Engine, walk_speed_mps: f64) -> Query<'a> {
+    pub fn new(engine: &'a Engine) -> Query<'a> {
         Query {
             engine,
-            walk: WalkSearch::new(&engine.walk, walk_speed_mps),
+            walk: WalkSearch::new(&engine.walk),
             raptor: Raptor::new(&engine.tt),
             active: None,
             depart: 0,
+            pace: 1.0,
             origin: None,
         }
     }
@@ -193,7 +194,7 @@ impl<'a> Query<'a> {
         let limit = opts.depart + opts.max_secs;
 
         // 1. walk from the origin to every stop in reach
-        self.walk.run([(origin, start)], limit);
+        self.walk.run([(origin, start)], limit, pace);
         let mut sources: Vec<(u32, u32)> = Vec::new();
         for (node, t) in self.walk.reached() {
             if let Some(stops) = e.node_stops.get(&node) {
@@ -215,7 +216,8 @@ impl<'a> Query<'a> {
                 sources.push((n, arr + (e.stop_snap_m[s as usize] as f64 * pace).round() as u32));
             }
         }
-        self.walk.run(sources, limit);
+        self.walk.run(sources, limit, pace);
+        self.pace = pace;
         true
     }
 
@@ -238,10 +240,14 @@ impl<'a> Query<'a> {
 
     /// Travel time to an arbitrary point: nearest node plus a straight-line
     /// walk from it. None if the point is off the network or out of reach.
-    pub fn point_secs(&self, lat: f64, lon: f64, walk_speed_mps: f64, snap_max_m: f64) -> Option<u32> {
+    pub fn point_secs(&self, lat: f64, lon: f64, snap_max_m: f64) -> Option<u32> {
         let (node, d) = self.engine.index().nearest(lat, lon, snap_max_m)?;
-        let t = self.node_secs(node)? + (d / walk_speed_mps).round() as u32;
-        Some(t)
+        Some(self.node_secs(node)? + (d * self.pace).round() as u32)
+    }
+
+    /// Seconds per meter used by the last run.
+    pub fn pace(&self) -> f64 {
+        self.pace
     }
 
     pub fn origin_node(&self) -> Option<u32> {
@@ -253,11 +259,3 @@ impl<'a> Query<'a> {
     }
 }
 
-/// Straight-line walking seconds between two points, for callers that want
-/// a cheap lower bound.
-pub fn crow_secs(lat1: f64, lon1: f64, lat2: f64, lon2: f64, walk_speed_mps: f64) -> u32 {
-    (haversine_m(lat1, lon1, lat2, lon2) / walk_speed_mps).round() as u32
-}
-
-#[allow(dead_code)]
-const _: u32 = UNREACHED;

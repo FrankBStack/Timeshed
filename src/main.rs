@@ -122,7 +122,7 @@ fn main() -> Result<()> {
             let engine = Engine::load(&bundle)?;
             log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
             let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() };
-            let mut q = Query::new(&engine, walk_speed);
+            let mut q = Query::new(&engine);
             let t1 = std::time::Instant::now();
             if !q.run(lat, lon, &opts) {
                 anyhow::bail!("origin is too far from the walking network");
