@@ -65,8 +65,9 @@ pub struct Timetable {
     pub routes: Vec<Route>,
     /// for every stop: (route, position of the stop within the route)
     pub stop_routes: Vec<Vec<(u32, u32)>>,
-    /// footpaths between stops in seconds; filled in once a walking graph exists
-    pub transfers: Vec<Vec<(u32, u32)>>,
+    /// footpaths between stops as (stop, walking meters); filled in once a
+    /// walking graph exists
+    pub transfers: Vec<Vec<(u32, f32)>>,
     pub services: ServiceCalendar,
     pub trip_ids: Vec<String>,
 }
