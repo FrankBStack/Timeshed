@@ -1,3 +1,4 @@
+use timeshed::access::{self, AccessOpts};
 use timeshed::engine::{BuildOpts, Engine, Query, QueryOpts};
 use timeshed::geo::BBox;
 use timeshed::gtfs::{format_time, parse_time};
@@ -79,6 +80,42 @@ enum Cmd {
         web: PathBuf,
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: std::net::SocketAddr,
+    },
+    /// Batch accessibility: weighted destinations reachable from every origin
+    Access {
+        /// Bundle written by `build`
+        #[arg(long)]
+        bundle: PathBuf,
+        /// CSV with id,lat,lon
+        #[arg(long)]
+        origins: PathBuf,
+        /// CSV with id,lat,lon and one or more weight columns
+        #[arg(long)]
+        dests: PathBuf,
+        /// Service date (YYYY-MM-DD)
+        #[arg(long)]
+        date: chrono::NaiveDate,
+        /// Explicit departure times, comma separated (HH:MM)
+        #[arg(long, value_delimiter = ',')]
+        times: Vec<String>,
+        /// Or a window: first departure (HH:MM)...
+        #[arg(long)]
+        from: Option<String>,
+        /// ...last departure, exclusive (HH:MM)...
+        #[arg(long)]
+        to: Option<String>,
+        /// ...stepping this many minutes
+        #[arg(long, default_value_t = 10)]
+        every: u32,
+        /// Travel time budget in minutes
+        #[arg(long, default_value_t = 45)]
+        max: u32,
+        /// Walking speed in m/s
+        #[arg(long, default_value_t = 1.3)]
+        walk_speed: f64,
+        /// Output CSV
+        #[arg(short, long)]
+        out: PathBuf,
     },
 }
 
@@ -178,6 +215,39 @@ fn main() -> Result<()> {
             log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(server::serve(engine, web, addr))?;
+        }
+        Cmd::Access { bundle, origins, dests, date, times, from, to, every, max, walk_speed, out } => {
+            let mut departures: Vec<u32> = times.iter().map(|t| time_arg(t)).collect::<Result<_>>()?;
+            if let (Some(from), Some(to)) = (from, to) {
+                let (mut t, end) = (time_arg(&from)?, time_arg(&to)?);
+                while t < end {
+                    departures.push(t);
+                    t += every * 60;
+                }
+            }
+            if departures.is_empty() {
+                anyhow::bail!("give --times or --from/--to");
+            }
+            let t0 = std::time::Instant::now();
+            let engine = Engine::load(&bundle)?;
+            let origins = access::read_origins(&origins)?;
+            let dests = access::read_dests(&dests)?;
+            log::info!(
+                "{} origins x {} departures on {date}, {} destinations weighted by {:?}, {max} min budget",
+                origins.len(),
+                departures.len(),
+                dests.dests.len(),
+                dests.names
+            );
+            let opts = AccessOpts {
+                base: QueryOpts { date, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() },
+                departures,
+                dest_snap_max_m: 500.0,
+            };
+            let rows = access::run(&engine, &origins, &dests, &opts);
+            access::write_rows(&out, &dests.names, &rows)?;
+            let off = rows.iter().filter(|r| !r.on_network).count() / opts.departures.len().max(1);
+            log::info!("wrote {} rows to {} ({off} origins off the network) in {:.1?}", rows.len(), out.display(), t0.elapsed());
         }
     }
     Ok(())

@@ -1,3 +1,4 @@
+pub mod access;
 pub mod engine;
 pub mod geo;
 pub mod gtfs;
