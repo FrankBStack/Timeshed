@@ -5,10 +5,13 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-chrono = "0.4.45"
+bincode = "1"
+chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.7", features = ["derive"] }
 csv = "1.4.0"
 env_logger = "0.11.11"
 log = "0.4.34"
+osmpbf = "0.3.8"
+rstar = "0.13.0"
 serde = { version = "1.0.229", features = ["derive"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

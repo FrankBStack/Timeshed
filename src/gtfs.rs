@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::{Datelike, NaiveDate};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -52,7 +52,7 @@ pub struct StopTime {
     pub drop_off: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Calendar {
     /// Monday..Sunday
     pub days: [bool; 7],
@@ -69,6 +69,61 @@ pub struct Frequency {
     pub exact: bool,
 }
 
+/// Service ids plus the rules that say which of them run on a given date.
+/// Kept separate from the feed so it can be carried into the built bundle.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ServiceCalendar {
+    pub ids: Vec<String>,
+    pub calendar: HashMap<u32, Calendar>,
+    /// service -> (date, added?)
+    pub calendar_dates: HashMap<u32, Vec<(NaiveDate, bool)>>,
+}
+
+impl ServiceCalendar {
+    /// Which services run on `date`, as a bitmap indexed like `self.ids`.
+    pub fn active(&self, date: NaiveDate) -> Vec<bool> {
+        let weekday = date.weekday().num_days_from_monday() as usize;
+        (0..self.ids.len() as u32)
+            .map(|s| {
+                let mut active = match self.calendar.get(&s) {
+                    Some(c) => c.days[weekday] && date >= c.start && date <= c.end,
+                    None => false,
+                };
+                if let Some(exceptions) = self.calendar_dates.get(&s) {
+                    for &(d, added) in exceptions {
+                        if d == date {
+                            active = added;
+                        }
+                    }
+                }
+                active
+            })
+            .collect()
+    }
+
+    /// First and last date on which any service runs.
+    pub fn date_range(&self) -> Option<(NaiveDate, NaiveDate)> {
+        let mut lo: Option<NaiveDate> = None;
+        let mut hi: Option<NaiveDate> = None;
+        let mut push = |d: NaiveDate| {
+            lo = Some(lo.map_or(d, |x| x.min(d)));
+            hi = Some(hi.map_or(d, |x| x.max(d)));
+        };
+        for c in self.calendar.values() {
+            push(c.start);
+            push(c.end);
+        }
+        for v in self.calendar_dates.values() {
+            for &(d, added) in v {
+                if added {
+                    push(d);
+                }
+            }
+        }
+        Some((lo?, hi?))
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Feed {
     pub stops: Vec<Stop>,
@@ -76,10 +131,7 @@ pub struct Feed {
     pub trips: Vec<Trip>,
     /// sorted by (trip, seq)
     pub stop_times: Vec<StopTime>,
-    pub services: Vec<String>,
-    pub calendar: HashMap<u32, Calendar>,
-    /// service -> (date, added?)
-    pub calendar_dates: HashMap<u32, Vec<(NaiveDate, bool)>>,
+    pub services: ServiceCalendar,
     pub frequencies: Vec<Frequency>,
 }
 
@@ -288,8 +340,8 @@ impl Feed {
         let mut service_index: HashMap<String, u32> = HashMap::new();
         let mut intern_service = |feed: &mut Feed, id: &str| -> u32 {
             *service_index.entry(id.to_owned()).or_insert_with(|| {
-                feed.services.push(id.to_owned());
-                (feed.services.len() - 1) as u32
+                feed.services.ids.push(id.to_owned());
+                (feed.services.ids.len() - 1) as u32
             })
         };
         let mut saw_calendar = false;
@@ -298,7 +350,7 @@ impl Feed {
                 let row = row.context("calendar.txt")?;
                 saw_calendar = true;
                 let s = intern_service(&mut feed, &row.service_id);
-                feed.calendar.insert(
+                feed.services.calendar.insert(
                     s,
                     Calendar {
                         days: [
@@ -321,7 +373,7 @@ impl Feed {
                 let row = row.context("calendar_dates.txt")?;
                 saw_calendar = true;
                 let s = intern_service(&mut feed, &row.service_id);
-                feed.calendar_dates
+                feed.services.calendar_dates
                     .entry(s)
                     .or_default()
                     .push((parse_date(&row.date)?, row.exception_type == 1));
@@ -404,27 +456,6 @@ impl Feed {
         }
 
         Ok(feed)
-    }
-
-    /// Which services run on `date`, as a bitmap indexed like `self.services`.
-    pub fn active_services(&self, date: NaiveDate) -> Vec<bool> {
-        let weekday = date.weekday().num_days_from_monday() as usize;
-        (0..self.services.len() as u32)
-            .map(|s| {
-                let mut active = match self.calendar.get(&s) {
-                    Some(c) => c.days[weekday] && date >= c.start && date <= c.end,
-                    None => false,
-                };
-                if let Some(exceptions) = self.calendar_dates.get(&s) {
-                    for &(d, added) in exceptions {
-                        if d == date {
-                            active = added;
-                        }
-                    }
-                }
-                active
-            })
-            .collect()
     }
 
     /// Stop times of one trip, in sequence order.

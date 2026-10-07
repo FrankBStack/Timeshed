@@ -36,12 +36,12 @@ fn main() -> Result<()> {
                 feed.routes.len(),
                 feed.trips.len(),
                 feed.stop_times.len(),
-                feed.services.len(),
+                feed.services.ids.len(),
                 feed.frequencies.len(),
                 t0.elapsed()
             );
             if let Some(date) = date {
-                let active = feed.active_services(date);
+                let active = feed.services.active(date);
                 let trips = feed.trips.iter().filter(|t| active[t.service as usize]).count();
                 println!("{date}: {} active services, {trips} trips", active.iter().filter(|a| **a).count());
             }
