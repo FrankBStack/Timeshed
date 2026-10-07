@@ -1,7 +1,8 @@
 use timeshed::engine::{BuildOpts, Engine, Query, QueryOpts};
 use timeshed::geo::BBox;
 use timeshed::gtfs::{format_time, parse_time};
-use timeshed::{gtfs, osm, timetable};
+use timeshed::isochrone::{Grid, IsochroneOpts};
+use timeshed::{gtfs, osm, server, timetable};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -64,6 +65,20 @@ enum Cmd {
         /// Walking speed in m/s
         #[arg(long, default_value_t = 1.3)]
         walk_speed: f64,
+        /// Write the isochrone bands as GeoJSON to this file
+        #[arg(long)]
+        geojson: Option<PathBuf>,
+    },
+    /// Serve the live map and the HTTP API
+    Serve {
+        /// Bundle written by `build`
+        #[arg(long)]
+        bundle: PathBuf,
+        /// Directory with the static frontend
+        #[arg(long, default_value = "web")]
+        web: PathBuf,
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: std::net::SocketAddr,
     },
 }
 
@@ -117,7 +132,7 @@ fn main() -> Result<()> {
             engine.save(&out)?;
             log::info!("wrote {} in {:.1?}", out.display(), t0.elapsed());
         }
-        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed } => {
+        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed, geojson } => {
             let t0 = std::time::Instant::now();
             let engine = Engine::load(&bundle)?;
             log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
@@ -146,6 +161,23 @@ fn main() -> Result<()> {
                 let st = &engine.tt.stops[*s as usize];
                 println!("  {:>5} min, {legs} trips: {} ({}, {})", secs / 60, st.name, st.lat, st.lon);
             }
+            if let Some(path) = geojson {
+                let t2 = std::time::Instant::now();
+                let iso = IsochroneOpts { max_secs: max * 60, ..Default::default() };
+                let fc = match Grid::from_query(&q, &iso) {
+                    Some(grid) => grid.isobands(&iso)?,
+                    None => serde_json::json!({ "type": "FeatureCollection", "features": [] }),
+                };
+                std::fs::write(&path, serde_json::to_vec(&fc)?)?;
+                println!("wrote {} ({:.1?})", path.display(), t2.elapsed());
+            }
+        }
+        Cmd::Serve { bundle, web, addr } => {
+            let t0 = std::time::Instant::now();
+            let engine = Engine::load(&bundle)?;
+            log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(server::serve(engine, web, addr))?;
         }
     }
     Ok(())
