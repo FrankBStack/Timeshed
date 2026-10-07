@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Timeshed</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <aside id="panel">
+    <h1>Timeshed</h1>
+    <p id="feed" class="muted">loading…</p>
+    <p class="hint">Drag the pin. Everything you can reach on foot plus transit, door to door.</p>
+    <div class="row">
+      <label>Date <input type="date" id="date"></label>
+      <label>Leave at <input type="time" id="time" value="08:00" step="300"></label>
+    </div>
+    <label class="slider">Within <output id="cutoff-out">30</output> min
+      <input type="range" id="cutoff" min="5" max="60" step="5" value="30">
+    </label>
+    <div id="legend"></div>
+    <p id="stats" class="muted"></p>
+    <p id="error" class="error" hidden></p>
+    <details>
+      <summary>About</summary>
+      <p>Walking network from OpenStreetMap, schedules from the agency's GTFS feed,
+      routed with an own RAPTOR implementation. Bands are 5 minutes wide; the slider
+      only filters what the server already computed, so it is instant. Changing the
+      time or date re-queries.</p>
+    </details>
+  </aside>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
