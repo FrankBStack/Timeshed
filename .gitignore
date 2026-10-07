@@ -2,3 +2,5 @@
 /data
 *.bin
 .DS_Store
+analysis/.venv
+__pycache__/
