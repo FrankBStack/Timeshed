@@ -1,12 +1,18 @@
 #!/bin/sh
 # Build the browser engine and assemble the static live map under docs/live.
-#   scripts/build-web.sh <bundle.bin> <bundle-url>
-# <bundle.bin> is a bundle from `timeshed build`; it is gzipped next to the
-# page for local testing, while the published page downloads <bundle-url>.
+#   scripts/build-web.sh <bundle.bin>
+# <bundle.bin> is a bundle from `timeshed build`. It is gzipped next to the
+# page: GitHub release assets are served without CORS headers, so the bundle
+# has to come from the same origin as the page.
 set -eu
 cd "$(dirname "$0")/.."
 BUNDLE=${1:?bundle path}
-URL=${2:?public bundle url}
+URL=bundle.bin.gz
+export PATH="$HOME/.cargo/bin:$PATH"
+# rust-lld looks for libLLVM next to itself; some rustup installs keep it one
+# level up. Harmless where the toolchain is fine. (macOS strips DYLD_* from a
+# caller's environment, so it has to be set here, not before the script.)
+export DYLD_FALLBACK_LIBRARY_PATH="$(rustc --print sysroot)/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
 
 wasm-pack build --target web --release --out-dir web/pkg --out-name timeshed --no-pack --no-typescript . \
     -- --no-default-features --features wasm
