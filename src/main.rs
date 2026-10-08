@@ -38,6 +38,9 @@ enum Cmd {
         /// Default: the stops' bounding box plus 2.5 km.
         #[arg(long, value_parser = parse_bbox)]
         bbox: Option<BBox>,
+        /// Merge runs of shape nodes into edges up to this long (meters)
+        #[arg(long, default_value_t = 150.0)]
+        max_edge: f32,
         /// Name of the bundle (shown in the UI)
         #[arg(long, default_value = "transit")]
         name: String,
@@ -203,7 +206,7 @@ fn main() -> Result<()> {
                 println!("{date}: {} active services, {trips} trips", active.iter().filter(|a| **a).count());
             }
         }
-        Cmd::Build { gtfs, osm, bbox, name, out } => {
+        Cmd::Build { gtfs, osm, bbox, max_edge, name, out } => {
             let t0 = std::time::Instant::now();
             let feed = gtfs::Feed::read(&gtfs)?;
             let tt = timetable::Timetable::from_feed(&feed);
@@ -217,7 +220,7 @@ fn main() -> Result<()> {
             );
             let bbox = bbox.unwrap_or_else(|| tt.bbox().buffer(2500.0));
             log::info!("walking bbox: {bbox:?}");
-            let walk = osm::read_walk_graph(&osm, bbox)?;
+            let walk = osm::read_walk_graph(&osm, bbox, max_edge)?;
             let engine = Engine::build(name, tt, walk, BuildOpts::default());
             engine.save(&out)?;
             log::info!("wrote {} in {:.1?}", out.display(), t0.elapsed());

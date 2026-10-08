@@ -49,7 +49,8 @@ impl Grid {
         let mut any = false;
         for (n, t) in q.reached_nodes() {
             if t <= opts.max_secs {
-                bbox.include(g.lon[n as usize], g.lat[n as usize]);
+                let (lat, lon) = g.lat_lon(n);
+                bbox.include(lon, lat);
                 any = true;
             }
         }
@@ -69,8 +70,9 @@ impl Grid {
             if t > opts.max_secs {
                 continue;
             }
-            let fx = (g.lon[n as usize] - bbox.min_lon) / dlon;
-            let fy = (g.lat[n as usize] - bbox.min_lat) / dlat;
+            let (lat, lon) = g.lat_lon(n);
+            let fx = (lon - bbox.min_lon) / dlon;
+            let fy = (lat - bbox.min_lat) / dlat;
             let (cx, cy) = (fx.round() as i64, fy.round() as i64);
             for j in (cy - r).max(0)..=(cy + r).min(ny as i64 - 1) {
                 for i in (cx - r).max(0)..=(cx + r).min(nx as i64 - 1) {

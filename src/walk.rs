@@ -9,9 +9,9 @@ use std::collections::BinaryHeap;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WalkGraph {
-    pub lat: Vec<f64>,
-    pub lon: Vec<f64>,
-    pub osm_id: Vec<i64>,
+    /// f32 is about half a meter at this latitude, and half the bundle size
+    pub lat: Vec<f32>,
+    pub lon: Vec<f32>,
     /// CSR adjacency: neighbours of node `n` are `targets[offsets[n]..offsets[n+1]]`
     pub offsets: Vec<u32>,
     pub targets: Vec<u32>,
@@ -27,6 +27,16 @@ impl WalkGraph {
 
     pub fn edge_count(&self) -> usize {
         self.targets.len()
+    }
+
+    #[inline]
+    pub fn lat_lon(&self, n: u32) -> (f64, f64) {
+        (self.lat[n as usize] as f64, self.lon[n as usize] as f64)
+    }
+
+    #[inline]
+    pub fn degree(&self, n: u32) -> usize {
+        (self.offsets[n as usize + 1] - self.offsets[n as usize]) as usize
     }
 
     #[inline]
@@ -48,8 +58,11 @@ pub struct WalkIndex {
 impl WalkIndex {
     pub fn build(g: &WalkGraph) -> WalkIndex {
         let proj = LocalProj::new(g.bbox.mid_lat(), g.bbox.mid_lon());
-        let pts: Vec<NodePoint> = (0..g.node_count())
-            .map(|i| GeomWithData::new(proj.to_xy(g.lat[i], g.lon[i]), i as u32))
+        let pts: Vec<NodePoint> = (0..g.node_count() as u32)
+            .map(|i| {
+                let (lat, lon) = g.lat_lon(i);
+                GeomWithData::new(proj.to_xy(lat, lon), i)
+            })
             .collect();
         WalkIndex { proj, tree: RTree::bulk_load(pts) }
     }
@@ -150,8 +163,8 @@ mod tests {
 
     /// A straight line of 5 nodes 100 m apart, plus one node 10 km away.
     fn line_graph() -> WalkGraph {
-        let lat: Vec<f64> = (0..5).map(|i| 43.0 + i as f64 * 0.0009).chain([43.1]).collect();
-        let lon = vec![-87.9; 6];
+        let lat: Vec<f32> = (0..5).map(|i| 43.0 + i as f32 * 0.0009).chain([43.1]).collect();
+        let lon = vec![-87.9f32; 6];
         let mut offsets = vec![0u32];
         let mut targets = Vec::new();
         let mut lengths = Vec::new();
@@ -168,9 +181,9 @@ mod tests {
         }
         let mut bbox = BBox::empty();
         for i in 0..6 {
-            bbox.include(lon[i], lat[i]);
+            bbox.include(lon[i] as f64, lat[i] as f64);
         }
-        WalkGraph { lat, lon, osm_id: (0..6).collect(), offsets, targets, lengths, bbox }
+        WalkGraph { lat, lon, offsets, targets, lengths, bbox }
     }
 
     #[test]
