@@ -1,44 +1,16 @@
-//! Walking graph extracted from an OpenStreetMap PBF file.
+//! Walking graph extracted from an OpenStreetMap PBF file. The graph type
+//! itself lives in `walk`; this module only knows how to build one.
 //!
 //! The extract is read twice: once to pick up the coordinates of every node
 //! inside the bounding box, then once more for ways, keeping only the ones a
 //! pedestrian can use. Edges are bidirectional, weighted by length in meters.
 
 use crate::geo::{BBox, haversine_m};
+use crate::walk::WalkGraph;
 use anyhow::{Context, Result};
 use osmpbf::{Element, ElementReader};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct WalkGraph {
-    pub lat: Vec<f64>,
-    pub lon: Vec<f64>,
-    pub osm_id: Vec<i64>,
-    /// CSR adjacency: neighbours of node `n` are `targets[offsets[n]..offsets[n+1]]`
-    pub offsets: Vec<u32>,
-    pub targets: Vec<u32>,
-    /// edge length in meters, parallel to `targets`
-    pub lengths: Vec<f32>,
-    pub bbox: BBox,
-}
-
-impl WalkGraph {
-    pub fn node_count(&self) -> usize {
-        self.lat.len()
-    }
-
-    pub fn edge_count(&self) -> usize {
-        self.targets.len()
-    }
-
-    #[inline]
-    pub fn neighbours(&self, n: u32) -> impl Iterator<Item = (u32, f32)> + '_ {
-        let (a, b) = (self.offsets[n as usize] as usize, self.offsets[n as usize + 1] as usize);
-        self.targets[a..b].iter().copied().zip(self.lengths[a..b].iter().copied())
-    }
-}
 
 /// Can a pedestrian use this way? Tags are (key, value) pairs.
 pub fn is_walkable<'a>(tags: impl Iterator<Item = (&'a str, &'a str)>) -> bool {

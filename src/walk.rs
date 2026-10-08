@@ -1,11 +1,41 @@
-//! Searching the walking graph: a spatial index for snapping points to
-//! nodes, and a reusable bounded Dijkstra.
+//! The walking graph and how to search it: a spatial index for snapping
+//! points to nodes, and a reusable bounded Dijkstra.
 
-use crate::geo::LocalProj;
-use crate::osm::WalkGraph;
+use crate::geo::{BBox, LocalProj};
 use rstar::{RTree, primitives::GeomWithData};
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WalkGraph {
+    pub lat: Vec<f64>,
+    pub lon: Vec<f64>,
+    pub osm_id: Vec<i64>,
+    /// CSR adjacency: neighbours of node `n` are `targets[offsets[n]..offsets[n+1]]`
+    pub offsets: Vec<u32>,
+    pub targets: Vec<u32>,
+    /// edge length in meters, parallel to `targets`
+    pub lengths: Vec<f32>,
+    pub bbox: BBox,
+}
+
+impl WalkGraph {
+    pub fn node_count(&self) -> usize {
+        self.lat.len()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.targets.len()
+    }
+
+    #[inline]
+    pub fn neighbours(&self, n: u32) -> impl Iterator<Item = (u32, f32)> + '_ {
+        let (a, b) = (self.offsets[n as usize] as usize, self.offsets[n as usize + 1] as usize);
+        self.targets[a..b].iter().copied().zip(self.lengths[a..b].iter().copied())
+    }
+}
+
 
 type NodePoint = GeomWithData<[f64; 2], u32>;
 
@@ -117,7 +147,6 @@ impl<'a> WalkSearch<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geo::BBox;
 
     /// A straight line of 5 nodes 100 m apart, plus one node 10 km away.
     fn line_graph() -> WalkGraph {

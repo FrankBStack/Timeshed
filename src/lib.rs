@@ -1,11 +1,16 @@
+#[cfg(feature = "native")]
 pub mod access;
 pub mod engine;
 pub mod geo;
 pub mod gtfs;
 pub mod isochrone;
+#[cfg(feature = "native")]
 pub mod osm;
 pub mod raptor;
 pub mod reference;
+#[cfg(feature = "native")]
 pub mod server;
 pub mod timetable;
 pub mod walk;
+#[cfg(feature = "wasm")]
+pub mod wasm;

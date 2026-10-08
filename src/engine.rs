@@ -1,16 +1,13 @@
 //! The routing bundle: timetable + walking graph + the glue between them,
 //! and the door-to-door query that runs on it.
 
-use crate::osm::WalkGraph;
 use crate::raptor::Raptor;
 use crate::timetable::Timetable;
-use crate::walk::{WalkIndex, WalkSearch};
-use anyhow::{Context, Result};
+use crate::walk::{WalkGraph, WalkIndex, WalkSearch};
+use anyhow::Result;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufReader, BufWriter};
-use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BuildOpts {
@@ -93,18 +90,32 @@ impl Engine {
         Engine { name, tt, walk, stop_node, stop_snap_m, build_opts: opts, index: Some(index), node_stops }
     }
 
-    pub fn save(&self, path: &Path) -> Result<()> {
+    #[cfg(feature = "native")]
+    pub fn save(&self, path: &std::path::Path) -> Result<()> {
+        use anyhow::Context;
         let f = std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
-        bincode::serialize_into(BufWriter::new(f), self)?;
+        bincode::serialize_into(std::io::BufWriter::new(f), self)?;
         Ok(())
     }
 
-    pub fn load(path: &Path) -> Result<Engine> {
+    #[cfg(feature = "native")]
+    pub fn load(path: &std::path::Path) -> Result<Engine> {
+        use anyhow::Context;
         let f = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let mut e: Engine = bincode::deserialize_from(BufReader::new(f))?;
-        e.index = Some(WalkIndex::build(&e.walk));
-        e.node_stops = reverse_map(&e.stop_node);
-        Ok(e)
+        let e: Engine = bincode::deserialize_from(std::io::BufReader::new(f))?;
+        Ok(e.finish_load())
+    }
+
+    /// Deserialize a bundle held in memory (the browser build's only way in).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Engine> {
+        let e: Engine = bincode::deserialize(bytes)?;
+        Ok(e.finish_load())
+    }
+
+    fn finish_load(mut self) -> Engine {
+        self.index = Some(WalkIndex::build(&self.walk));
+        self.node_stops = reverse_map(&self.stop_node);
+        self
     }
 
     pub fn index(&self) -> &WalkIndex {
