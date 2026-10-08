@@ -11,6 +11,62 @@ const RAMP = ['#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6',
 const $ = (id) => document.getElementById(id);
 const state = { lat: null, lon: null, info: null, pending: null, timer: null };
 
+// Two ways to reach the engine: the native server's HTTP API, or the same
+// engine compiled to WebAssembly running in a worker (when the page sets
+// window.TIMESHED_BUNDLE_URL). The rest of the page does not care which.
+const backend = window.TIMESHED_BUNDLE_URL ? wasmBackend(window.TIMESHED_BUNDLE_URL) : httpBackend();
+
+function httpBackend() {
+  return {
+    async info() { return (await fetch('/api/info')).json(); },
+    async isochrone(params) {
+      const res = await fetch('/api/isochrone?' + new URLSearchParams(params).toString());
+      if (!res.ok) throw new Error(await res.text());
+      const fc = await res.json();
+      return { fc, note: `routed in ${fc.properties.query_ms} ms, drawn in ${fc.properties.total_ms} ms` };
+    },
+  };
+}
+
+function wasmBackend(bundleUrl) {
+  const worker = new Worker('worker.js', { type: 'module' });
+  const waiting = new Map();
+  let nextId = 1;
+  const ready = new Promise((resolve, reject) => {
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'progress') {
+        const pct = m.total ? Math.round(100 * m.loaded / m.total) : null;
+        $('stats').textContent = pct === null
+          ? `downloading the network… ${(m.loaded / 1e6).toFixed(1)} MB`
+          : `downloading the network… ${pct}%`;
+      } else if (m.type === 'ready') {
+        $('stats').textContent = `${(m.bytes / 1e6).toFixed(0)} MB bundle loaded in ${m.ms.toFixed(0)} ms, routing in your browser`;
+        resolve(m.info);
+      } else if (m.type === 'isochrone' || m.type === 'error') {
+        const w = waiting.get(m.id);
+        waiting.delete(m.id);
+        if (!w) return;
+        if (m.type === 'error') w.reject(new Error(m.message));
+        else w.resolve({ fc: JSON.parse(m.geojson), note: `routed and drawn in your browser in ${m.ms.toFixed(0)} ms` });
+      }
+    };
+    worker.onerror = (e) => reject(new Error(e.message));
+  });
+  worker.postMessage({ type: 'load', bundleUrl });
+  return {
+    info() { return ready; },
+    async isochrone(params) {
+      await ready;
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        waiting.set(id, { resolve, reject });
+        worker.postMessage({ type: 'isochrone', id, params });
+      });
+    },
+  };
+}
+
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.has('lat') && h.has('lon')) {
@@ -62,7 +118,8 @@ function buildLegend() {
 }
 
 async function init() {
-  const info = await (await fetch('/api/info')).json();
+  $('stats').textContent = 'loading…';
+  const info = await backend.info();
   state.info = info;
   $('feed').textContent = `${info.name} · ${info.stops.toLocaleString()} stops · ${info.walk_nodes.toLocaleString()} walking nodes`;
 
@@ -134,23 +191,18 @@ function applyCutoff(map) {
 async function query(map) {
   if (!$('date').value || !$('time').value) return;
   writeHash();
-  const params = new URLSearchParams({
-    lat: state.lat, lon: state.lon, date: $('date').value, time: $('time').value, max: MAX, band: BAND,
-  });
-  const url = '/api/isochrone?' + params.toString();
-  state.pending = url;
+  const params = { lat: state.lat, lon: state.lon, date: $('date').value, time: $('time').value, max: MAX, band: BAND };
+  const token = JSON.stringify(params);
+  state.pending = token;
   $('stats').textContent = 'routing…';
   $('error').hidden = true;
   try {
-    const res = await fetch(url);
-    if (state.pending !== url) return; // a newer query superseded this one
-    if (!res.ok) throw new Error(await res.text());
-    const fc = await res.json();
+    const { fc, note } = await backend.isochrone(params);
+    if (state.pending !== token) return; // a newer query superseded this one
     map.getSource('iso').setData(fc);
     const p = fc.properties || {};
     $('stats').textContent =
-      `${(p.stops_by_transit || 0).toLocaleString()} stops reachable by transit within ${MAX} min · ` +
-      `routed in ${p.query_ms} ms, drawn in ${p.total_ms} ms`;
+      `${(p.stops_by_transit || 0).toLocaleString()} stops reachable by transit within ${MAX} min · ${note}`;
   } catch (err) {
     $('stats').textContent = '';
     $('error').textContent = err.message;
