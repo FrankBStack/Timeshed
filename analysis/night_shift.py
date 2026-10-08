@@ -133,7 +133,7 @@ def main():
     for sp in ["top", "right", "left"]:
         ax.spines[sp].set_visible(False)
     ax.tick_params(axis="y", length=0)
-    ax.legend(frameon=False, loc="lower right", ncol=2)
+    ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2)
     fig.savefig(figs / "night_by_sector.png", dpi=110, bbox_inches="tight")
     plt.close(fig)
 
