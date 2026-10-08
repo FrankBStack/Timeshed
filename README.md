@@ -65,6 +65,8 @@ script.
 - Only trips on the queried service day count. After-midnight departures use the
   previous day's late trips (GTFS times past 24:00), which is what matters for the
   midnight–2 am window; no next-morning trips are needed before 4 am.
+- No boarding slack: a bus that leaves the second you reach the stop counts as
+  caught. r5 and OpenTripPlanner assume a minute of slack; `--board-slack` turns it on.
 - Jobs are counted at the block they are in, reached if the block's internal point is
   reachable. Jobs outside the walking bounding box, and transit run by neighbouring
   counties' systems, are not included. The Hop streetcar is a separate feed and is not
@@ -95,7 +97,9 @@ OSM .pbf ──> osm.rs  ──> walk.rs ───────┘
   Milwaukee County comes out at 593k nodes and 1.5M directed edges.
 - **RAPTOR.** Standard round-based scan with per-round labels, local pruning against the
   best-known arrival and a time budget, binary search for the first catchable trip
-  (valid because routes are non-overtaking), and footpath relaxation after each round.
+  (valid because routes are non-overtaking), and footpaths relaxed to a fixed point
+  after each round, since ours are a bounded walking search rather than a transitive
+  closure.
 - **Door to door.** A bounded Dijkstra from the origin seeds every stop in walking
   reach; RAPTOR runs; a multi-source Dijkstra from every reached stop labels the walking
   nodes. Isochrones splat node labels onto a 100 m grid and cut it into 5-minute bands.
@@ -123,6 +127,34 @@ The property test earned its keep immediately: it caught the earliest-trip
 assumption breaking when the first catchable trip refuses to let you off at a
 stop where a later trip on the same stop sequence does. Routes are now grouped
 by board/alight pattern as well as stop sequence.
+
+Those checks prove RAPTOR agrees with a simpler router on the same data. To check
+the whole door-to-door pipeline, including the walking graph, snapping and
+transfers, `analysis/crosscheck_r5.py` runs the same 150 origins and 150
+destinations through [r5](https://github.com/conveyal/r5) (Conveyal's router, via
+r5py) on the same feed and OSM extract, leaving at 8:00 on the same weekday with a
+two-hour budget. The two share no code.
+
+![Timeshed against r5, 19,425 pairs](docs/figures/crosscheck_r5.png)
+
+| | |
+|---|---:|
+| Pairs reachable by both within two hours | 19,425 of 22,500 |
+| Reachable by only one router (nearly all over 80 minutes, at the edge of the budget) | 780 Timeshed, 51 r5 |
+| Median difference (Timeshed minus r5) | +0.5 min |
+| Within 1 / 2 / 5 minutes | 68% / 86% / 92% |
+| 10th to 90th percentile of the difference, trips under 90 minutes | −0.7 to +2.6 min |
+
+The first run disagreed on a fifth of pairs, always with Timeshed faster. The
+cause was R5's hard-coded 60-second boarding slack: it assumes you miss a bus
+that leaves within a minute of your arrival at the stop. Adding the same rule
+(`--board-slack 60`) produced the table above, and 60 seconds fits r5 better than
+30, 90 or 120. The remaining tail is long trips and a handful of specific points
+where the two routers attach a point to the street network differently. r5
+reports whole minutes, which is where the +0.5 median comes from.
+
+The analysis above uses no boarding slack, so its travel times are a hair
+optimistic by r5's standard. It makes no visible difference to the findings.
 
 ### Numbers on a 12-core laptop
 
@@ -181,7 +213,8 @@ src/gtfs.rs        GTFS reader                 src/engine.rs     bundle + door-t
 src/timetable.rs   RAPTOR route grouping       src/isochrone.rs  grid + marching squares
 src/osm.rs         walking graph from PBF      src/access.rs     batch accessibility
 src/walk.rs        r-tree + bounded Dijkstra   src/server.rs     axum API
-src/raptor.rs      the algorithm               web/              live map (MapLibre)
+src/raptor.rs      the algorithm               src/reference.rs  brute-force router for checking
+web/               live map (MapLibre)
 analysis/          census + LODES prep, summary and figures
 docs/              published results map and figures
 ```

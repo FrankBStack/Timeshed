@@ -7,7 +7,7 @@
   "scenarios": {
     "weekday_am": {
       "label": "Weekday 7\u20139 am",
-      "mean": 112168.93175064989,
+      "mean": 112173.03124139809,
       "median": 104225.58333333333,
       "share_reaching_100k": 0.5132216161730249,
       "share_reaching_25k": 0.7976379353884546,
@@ -17,7 +17,7 @@
     },
     "weekday_midday": {
       "label": "Weekday noon\u20132 pm",
-      "mean": 96217.6276097912,
+      "mean": 96220.29423028496,
       "median": 87064.5,
       "share_reaching_100k": 0.4441636183658835,
       "share_reaching_25k": 0.7809432275511694,
@@ -27,7 +27,7 @@
     },
     "weekday_night": {
       "label": "Weekday 10 pm\u2013midnight",
-      "mean": 88938.35351880286,
+      "mean": 88940.07003855084,
       "median": 78128.75,
       "share_reaching_100k": 0.41015086824627783,
       "share_reaching_25k": 0.7567056401644751,
@@ -37,9 +37,9 @@
     },
     "weekday_owl": {
       "label": "Weekday midnight\u20132 am",
-      "mean": 48648.06236283534,
+      "mean": 48657.35521485859,
       "median": 33932.25,
-      "share_reaching_100k": 0.14911971324484471,
+      "share_reaching_100k": 0.14934453985664373,
       "share_reaching_25k": 0.5904085344608051,
       "share_under_5k": 0.0699381247329518,
       "p10": 6594.3,
@@ -47,27 +47,27 @@
     },
     "sunday_am": {
       "label": "Sunday 7\u20139 am",
-      "mean": 101587.16156074064,
+      "mean": 101595.77580506928,
       "median": 92405.83333333333,
       "share_reaching_100k": 0.47590892284611314,
       "share_reaching_25k": 0.792633145835753,
       "share_under_5k": 0.05246344969264817,
       "p10": 10286.783333333336,
-      "p90": 201176.31666666668
+      "p90": 201205.63333333336
     }
   },
   "night_vs_am": {
-    "median_ratio": 0.7928513115929301,
+    "median_ratio": 0.7928372694895655,
     "share_losing_half": 0.04260837228729644,
     "share_losing_three_quarters": 0.004543415510478945,
     "share_under_5k": 0.06497915292578271,
-    "mean_ratio_of_means": 0.792896501114156
+    "mean_ratio_of_means": 0.7928828262396729
   },
   "owl_vs_am": {
     "median_ratio": 0.4100321683203706,
-    "share_losing_half": 0.661637014771428,
+    "share_losing_half": 0.6616881601617899,
     "share_losing_three_quarters": 0.09818103550235961,
     "share_under_5k": 0.0699381247329518,
-    "mean_ratio_of_means": 0.43370353629630143
+    "mean_ratio_of_means": 0.43377053001400323
   }
 }
