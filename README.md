@@ -57,6 +57,40 @@ All figures are population weighted.
 
 ![Jobs reachable within 45 minutes, by departure window](docs/figures/jobs_by_time_of_day.png)
 
+### Who loses after midnight
+
+The obvious follow-up is whether the people who work nights are the ones left
+without a bus. LODES breaks jobs out by wage band and sector, and workers by wage
+band at their home block, so the same batch runs answer it. Two things I expected
+to find, and did not:
+
+- **Low-wage workers are not disproportionately stranded.** Weighted by where
+  low-wage workers (under $1,250 a month) live, the median one can reach 22,556
+  low-wage jobs at 8 am and 7,654 after midnight, keeping 40% of morning access.
+  Weighted by everyone else, the numbers are 20,886, 7,078 and 40%. Low-wage
+  workers live closer to the frequent network, so they start slightly ahead and
+  fall by the same share. Only the quarter of blocks with the highest low-wage
+  share does a little worse (38% kept against 41 to 43%).
+- **The night-shift sectors fall like everything else.** Health care (101,590
+  jobs in the study area) and food service (41,444) keep 39% of the morning reach
+  after midnight; all jobs keep 41%. The after-midnight network is a few radial
+  lines through the core, and it does not favour hospitals.
+
+![Share of morning reach kept after dark, by job sector](docs/figures/night_by_sector.png)
+
+![Low-wage jobs reachable, low-wage workers against other workers](docs/figures/night_low_wage_workers.png)
+
+What that uniformity hides is how little is left in absolute terms: after
+midnight, a third of low-wage workers can reach fewer than 5,000 low-wage jobs
+within 45 minutes, and two thirds of residents can reach fewer than 5,000 food
+service jobs. The equity problem in Milwaukee's late-night transit is not that it
+cuts some neighbourhoods more than others. It is that after 1 am it cuts
+everyone to the Green, Purple and Blue lines and route 30, and that whether you
+can get to a night shift depends on whether you happen to live on one of them.
+
+(`analysis/night_shift.py`; "low-wage" is LODES earnings band CE01, which also
+includes part-time and student workers.)
+
 ![Share of residents by jobs reachable, one curve per departure window](docs/figures/residents_by_access.png)
 
 The interactive version, with every block hoverable and each window selectable, is in
