@@ -11,6 +11,12 @@ to the door. Because the schedule is real, 8 am and 11 pm give different shapes.
 
 ![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday](docs/figures/live_map.png)
 
+**Try it:** the live map runs entirely in your browser at
+<https://frankbstack.github.io/Timeshed/live/>. The same Rust engine is compiled
+to WebAssembly and runs in a web worker; the page downloads a 7 MB bundle (the
+whole county's schedule and walking network) once, then answers each drag in
+about 100 ms with no server involved.
+
 Everything is built from two free sources: the [MCTS GTFS feed](https://kamino.mcts.org/gtfs/google_transit.zip)
 and the [Geofabrik Wisconsin extract](https://download.geofabrik.de/north-america/us/wisconsin.html).
 
@@ -156,6 +162,26 @@ reports whole minutes, which is where the +0.5 median comes from.
 The analysis above uses no boarding slack, so its travel times are a hair
 optimistic by r5's standard. It makes no visible difference to the findings.
 
+### The browser build
+
+The crate is split in two by a feature flag. The routing core (timetable,
+walking graph, RAPTOR, isochrones, bundle deserialization) has no OS
+dependencies and compiles for `wasm32`; the feed and PBF readers, the CLI, the
+server and rayon sit behind the default `native` feature. `src/wasm.rs` exposes
+the engine through wasm-bindgen with the same JSON shapes as the HTTP API, and
+`web/app.js` picks a backend at load time: the server's `/api` when running
+under `timeshed serve`, or a web worker running the wasm when the page names a
+bundle URL. `scripts/build-web.sh` builds the package and assembles `docs/live`.
+
+To make that practical the bundle had to shrink. Coordinates are f32, OSM ids are
+gone, and runs of shape nodes are merged into edges of at most 150 m, which keeps
+isochrones smooth while cutting Milwaukee's walking graph from 593k nodes to
+259k. The bundle went from 39 MB to 21 MB, 7 MB gzipped, and queries got faster.
+The browser inflates the gzip itself with `DecompressionStream`, so the host
+needs no special configuration. GitHub release assets were the plan for hosting
+the bundle, but they are served without CORS headers, so it ships next to the
+page instead.
+
 ### Numbers on a 12-core laptop
 
 | Step | Time |
@@ -166,6 +192,7 @@ optimistic by r5's standard. It makes no visible difference to the findings.
 | Door-to-door query, 45-minute budget | ~20 ms |
 | 60-minute isochrone with bands, as GeoJSON | ~90 ms |
 | Batch: 10,690 origins × 12 departures | ~110 s |
+| Same 60-minute isochrone, WebAssembly in Brave | ~130 ms |
 
 ## Running it
 
@@ -181,6 +208,10 @@ cargo run --release -- query --bundle data/bundles/milwaukee.bin \
 
 # the live map on http://127.0.0.1:8080
 cargo run --release -- serve --bundle data/bundles/milwaukee.bin
+
+# the same map as static files that route in the browser (needs wasm-pack)
+scripts/build-web.sh data/bundles/milwaukee.bin && (cd docs && python3 -m http.server 8090)
+# then open http://127.0.0.1:8090/live/
 ```
 
 To reproduce the analysis:
@@ -214,7 +245,8 @@ src/timetable.rs   RAPTOR route grouping       src/isochrone.rs  grid + marching
 src/osm.rs         walking graph from PBF      src/access.rs     batch accessibility
 src/walk.rs        r-tree + bounded Dijkstra   src/server.rs     axum API
 src/raptor.rs      the algorithm               src/reference.rs  brute-force router for checking
-web/               live map (MapLibre)
-analysis/          census + LODES prep, summary and figures
-docs/              published results map and figures
+src/wasm.rs        browser bindings            web/              live map (MapLibre), worker
+scripts/           build-web.sh assembles the browser build
+analysis/          census + LODES prep, summary, figures, r5 cross-check
+docs/              published results map, figures, and the browser build in docs/live
 ```
