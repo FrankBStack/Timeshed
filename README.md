@@ -14,7 +14,7 @@ to the door. Because the schedule is real, 8 am and 11 pm give different shapes.
 ![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday](docs/figures/live_map.png)
 
 **Try it:** the live map runs entirely in your browser at
-<https://frankbstack.github.io/Timeshed/live/>. The same Rust engine is compiled
+<https://timeshed.frankbs.dev/live/>. The same Rust engine is compiled
 to WebAssembly and runs in a web worker; the page downloads a 7 MB bundle (the
 whole county's schedule and walking network) once, then answers each drag in
 about 100 ms with no server involved.
@@ -94,7 +94,7 @@ includes part-time and student workers.)
 ![Share of residents by jobs reachable, one curve per departure window](docs/figures/residents_by_access.png)
 
 The interactive version, with every block hoverable and each window selectable, is in
-[`docs/`](docs/) and published at <https://frankbstack.github.io/Timeshed/>.
+[`docs/`](docs/) and published at <https://timeshed.frankbs.dev/>.
 The per-block table is written to `data/analysis/access_by_block.csv` by the analysis
 script.
 

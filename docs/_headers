@@ -1,0 +1,11 @@
+# Cloudflare Pages headers. The bundle and wasm are big and change only when
+# the schedule or the engine does; a day keeps repeat visits fast without
+# risking a stale bundle against a newer wasm.
+/live/bundle.bin.gz
+  Cache-Control: public, max-age=86400
+/live/pkg/*
+  Cache-Control: public, max-age=86400
+/data/*
+  Cache-Control: public, max-age=86400
+/*.html
+  Cache-Control: public, max-age=300
