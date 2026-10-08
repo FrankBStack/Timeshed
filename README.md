@@ -1,5 +1,7 @@
 # Timeshed
 
+[![ci](https://github.com/FrankBStack/Timeshed/actions/workflows/ci.yml/badge.svg)](https://github.com/FrankBStack/Timeshed/actions/workflows/ci.yml)
+
 A door-to-door transit travel time engine, and what it says about Milwaukee after dark.
 
 Drop a pin anywhere in Milwaukee County and the area you can reach within N minutes by
@@ -250,3 +252,8 @@ scripts/           build-web.sh assembles the browser build
 analysis/          census + LODES prep, summary, figures, r5 cross-check
 docs/              published results map, figures, and the browser build in docs/live
 ```
+
+## License
+
+MIT. Transit data is the agency's, map data is © OpenStreetMap contributors,
+and census data is public domain.
