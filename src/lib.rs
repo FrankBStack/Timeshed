@@ -5,6 +5,7 @@ pub mod gtfs;
 pub mod isochrone;
 pub mod osm;
 pub mod raptor;
+pub mod reference;
 pub mod server;
 pub mod timetable;
 pub mod walk;
