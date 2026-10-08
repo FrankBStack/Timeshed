@@ -4,3 +4,5 @@ pyogrio
 shapely
 matplotlib
 pyarrow
+r5py
+osmium
