@@ -117,6 +117,23 @@ enum Cmd {
         #[arg(short, long)]
         out: PathBuf,
     },
+    /// Check RAPTOR against a brute-force router on random queries
+    Verify {
+        /// Bundle written by `build`
+        #[arg(long)]
+        bundle: PathBuf,
+        /// The GTFS feed the bundle was built from
+        #[arg(long)]
+        gtfs: PathBuf,
+        /// Number of random queries
+        #[arg(long, default_value_t = 1000)]
+        queries: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Travel time budget in minutes
+        #[arg(long, default_value_t = 90)]
+        max: u32,
+    },
 }
 
 fn time_arg(s: &str) -> Result<u32> {
@@ -248,6 +265,95 @@ fn main() -> Result<()> {
             access::write_rows(&out, &dests.names, &rows)?;
             let off = rows.iter().filter(|r| !r.on_network).count() / opts.departures.len().max(1);
             log::info!("wrote {} rows to {} ({off} origins off the network) in {:.1?}", rows.len(), out.display(), t0.elapsed());
+        }
+        Cmd::Verify { bundle, gtfs, queries, seed, max } => {
+            use rand::prelude::*;
+            use rayon::prelude::*;
+            use timeshed::raptor::Raptor;
+            use timeshed::reference::Harness;
+
+            let engine = Engine::load(&bundle)?;
+            let feed = gtfs::Feed::read(&gtfs)?;
+            let tt = &engine.tt;
+            let harness = Harness::new(&feed, tt);
+            let (first, last) = tt.services.date_range().ok_or_else(|| anyhow::anyhow!("feed has no service dates"))?;
+            let days = (last - first).num_days().max(0) as u64;
+            log::info!("{queries} random queries over {} stops, dates {first}..{last}, {max} min budget", tt.stops.len());
+
+            // one query spec per seed so runs are reproducible and parallel
+            let specs: Vec<(chrono::NaiveDate, Vec<(u32, u32)>)> = (0..queries as u64)
+                .map(|i| {
+                    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(1_000_003).wrapping_add(i));
+                    let date = first + chrono::Days::new(rng.random_range(0..=days));
+                    let n = rng.random_range(1..=3);
+                    let start = 4 * 3600 + rng.random_range(0..22 * 3600);
+                    let sources = (0..n)
+                        .map(|_| (rng.random_range(0..tt.stops.len()) as u32, start + rng.random_range(0..600)))
+                        .collect();
+                    (date, sources)
+                })
+                .collect();
+
+            let t0 = std::time::Instant::now();
+            let pace = 1.0 / 1.3;
+            let results: Vec<(usize, Vec<(u32, u32, u32)>, usize, usize)> = specs
+                .par_iter()
+                .enumerate()
+                .map_init(
+                    || (Raptor::new(tt), Raptor::new(tt)),
+                    |(raptor, capped), (i, (date, sources))| {
+                        let active = tt.services.active(*date);
+                        let start = sources.iter().map(|s| s.1).min().unwrap();
+                        let limit = start + max * 60;
+                        let bad = harness.compare(raptor, &active, sources, 100, pace, limit);
+                        // how much does the default round cap cost?
+                        capped.run(tt, &active, sources.iter().copied(), QueryOpts::default().max_rounds, pace, limit);
+                        let reached = raptor.reached().count();
+                        let lost = (0..tt.stops.len() as u32)
+                            .filter(|&s| raptor.arrival(s) != capped.arrival(s))
+                            .count();
+                        (i, bad, reached, lost)
+                    },
+                )
+                .collect();
+
+            let mut mismatches = 0usize;
+            let mut labels = 0usize;
+            let mut lost = 0usize;
+            let mut shown = 0;
+            for (i, bad, reached, l) in &results {
+                labels += reached;
+                lost += l;
+                if !bad.is_empty() {
+                    mismatches += bad.len();
+                    if shown < 10 {
+                        shown += 1;
+                        let (date, sources) = &specs[*i];
+                        let (s, a, b) = bad[0];
+                        println!(
+                            "MISMATCH query {i} on {date} from {:?}: stop {} ({}) raptor={} brute={} (+{} more)",
+                            sources,
+                            tt.stops[s as usize].gtfs_id,
+                            tt.stops[s as usize].name,
+                            if a == u32::MAX { "unreached".to_string() } else { format_time(a) },
+                            if b == u32::MAX { "unreached".to_string() } else { format_time(b) },
+                            bad.len() - 1
+                        );
+                    }
+                }
+            }
+            println!(
+                "{queries} queries, {labels} reached stop labels compared against brute force: {mismatches} mismatches ({:.1?})",
+                t0.elapsed()
+            );
+            println!(
+                "labels that need more than {} trips (lost under the default round cap): {lost} ({:.4}%)",
+                QueryOpts::default().max_rounds,
+                100.0 * lost as f64 / labels.max(1) as f64
+            );
+            if mismatches > 0 {
+                std::process::exit(1);
+            }
         }
     }
     Ok(())
