@@ -117,6 +117,33 @@ enum Cmd {
         #[arg(short, long)]
         out: PathBuf,
     },
+    /// Pairwise travel times, origins x destinations, at one departure
+    Matrix {
+        /// Bundle written by `build`
+        #[arg(long)]
+        bundle: PathBuf,
+        /// CSV with id,lat,lon
+        #[arg(long)]
+        origins: PathBuf,
+        /// CSV with id,lat,lon (other columns ignored)
+        #[arg(long)]
+        dests: PathBuf,
+        /// Service date (YYYY-MM-DD)
+        #[arg(long)]
+        date: chrono::NaiveDate,
+        /// Departure time (HH:MM)
+        #[arg(long)]
+        time: String,
+        /// Travel time budget in minutes
+        #[arg(long, default_value_t = 120)]
+        max: u32,
+        /// Walking speed in m/s
+        #[arg(long, default_value_t = 1.3)]
+        walk_speed: f64,
+        /// Output CSV: origin,dest,seconds (unreachable pairs are omitted)
+        #[arg(short, long)]
+        out: PathBuf,
+    },
     /// Check RAPTOR against a brute-force router on random queries
     Verify {
         /// Bundle written by `build`
@@ -265,6 +292,30 @@ fn main() -> Result<()> {
             access::write_rows(&out, &dests.names, &rows)?;
             let off = rows.iter().filter(|r| !r.on_network).count() / opts.departures.len().max(1);
             log::info!("wrote {} rows to {} ({off} origins off the network) in {:.1?}", rows.len(), out.display(), t0.elapsed());
+        }
+        Cmd::Matrix { bundle, origins, dests, date, time, max, walk_speed, out } => {
+            let t0 = std::time::Instant::now();
+            let engine = Engine::load(&bundle)?;
+            let origins = access::read_origins(&origins)?;
+            let dests = access::read_origins(&dests)?
+                .into_iter()
+                .map(|o| access::Dest { id: o.id, lat: o.lat, lon: o.lon, weights: vec![] })
+                .collect::<Vec<_>>();
+            let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() };
+            let m = access::matrix(&engine, &origins, &dests, &opts, 500.0);
+            let mut w = csv::Writer::from_path(&out)?;
+            w.write_record(["origin", "dest", "seconds"])?;
+            let mut n = 0usize;
+            for (o, row) in origins.iter().zip(&m) {
+                for (d, t) in dests.iter().zip(row) {
+                    if let Some(t) = t {
+                        w.write_record([&o.id, &d.id, &t.to_string()])?;
+                        n += 1;
+                    }
+                }
+            }
+            w.flush()?;
+            log::info!("{n} reachable pairs of {} written to {} ({:.1?})", origins.len() * dests.len(), out.display(), t0.elapsed());
         }
         Cmd::Verify { bundle, gtfs, queries, seed, max } => {
             use rand::prelude::*;

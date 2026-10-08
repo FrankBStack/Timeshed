@@ -166,3 +166,31 @@ pub fn write_rows(path: &Path, names: &[String], rows: &[Row]) -> Result<()> {
     w.flush()?;
     Ok(())
 }
+
+/// Pairwise travel times from every origin to every destination at one
+/// departure, in seconds; `None` where the budget is exceeded. Rows are in
+/// origin order, each a Vec in destination order.
+pub fn matrix(engine: &Engine, origins: &[Origin], dests: &[Dest], opts: &QueryOpts, dest_snap_max_m: f64) -> Vec<Vec<Option<u32>>> {
+    let index = engine.index();
+    let snapped: Vec<Option<(u32, f64)>> = dests.iter().map(|d| index.nearest(d.lat, d.lon, dest_snap_max_m)).collect();
+    origins
+        .par_iter()
+        .map_init(
+            || Query::new(engine),
+            |q, o| {
+                if !q.run(o.lat, o.lon, opts) {
+                    return vec![None; dests.len()];
+                }
+                let pace = q.pace();
+                snapped
+                    .iter()
+                    .map(|s| {
+                        let (n, m) = (*s)?;
+                        let t = q.node_secs(n)? + (m * pace).round() as u32;
+                        (t <= opts.max_secs).then_some(t)
+                    })
+                    .collect()
+            },
+        )
+        .collect()
+}
