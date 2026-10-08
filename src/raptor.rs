@@ -91,7 +91,9 @@ impl Raptor {
     }
 
     /// `sources` are (stop, time already there). `walk_pace` is seconds per
-    /// meter for footpaths. No label above `limit` is kept.
+    /// meter for footpaths. `board_slack` is how many seconds before a
+    /// departure you must be at the stop to board it. No label above
+    /// `limit` is kept.
     pub fn run(
         &mut self,
         tt: &Timetable,
@@ -99,6 +101,7 @@ impl Raptor {
         sources: impl IntoIterator<Item = (u32, u32)>,
         max_rounds: usize,
         walk_pace: f64,
+        board_slack: u32,
         limit: u32,
     ) {
         self.reset();
@@ -151,6 +154,7 @@ impl Raptor {
                     if ready == UNREACHED {
                         continue;
                     }
+                    let ready = ready + board_slack;
                     let can_board_earlier = match trip {
                         None => true,
                         Some(t) => ready <= route.event(t, i).dep,
@@ -278,7 +282,7 @@ mod tests {
         let tt = tiny();
         let mut r = Raptor::new(&tt);
         // at stop 0 at 7:05 -> catch the 7:15 trip, arrive stop 2 at 7:35
-        r.run(&tt, &[true, false], [(0, 7 * 3600 + 300)], 5, 1.0, u32::MAX);
+        r.run(&tt, &[true, false], [(0, 7 * 3600 + 300)], 5, 1.0, 0, u32::MAX);
         assert_eq!(r.arrival(2), Some(7 * 3600 + 900 + 1200));
         assert_eq!(r.legs(2), 1);
         // transfer to B: the 7:36:40 trip is inactive (service 1), next is 7:51:40
@@ -294,11 +298,23 @@ mod tests {
     fn respects_limit_and_resets() {
         let tt = tiny();
         let mut r = Raptor::new(&tt);
-        r.run(&tt, &[true, true], [(0, 7 * 3600)], 5, 1.0, 7 * 3600 + 700);
+        r.run(&tt, &[true, true], [(0, 7 * 3600)], 5, 1.0, 0, 7 * 3600 + 700);
         assert_eq!(r.arrival(1), Some(7 * 3600 + 600));
         assert_eq!(r.arrival(2), None);
-        r.run(&tt, &[true, true], [(3, 0)], 5, 1.0, u32::MAX);
+        r.run(&tt, &[true, true], [(3, 0)], 5, 1.0, 0, u32::MAX);
         assert_eq!(r.arrival(0), None, "stale labels must be cleared");
         assert_eq!(r.arrival(3), Some(0));
+    }
+
+    #[test]
+    fn boarding_slack_misses_tight_connections() {
+        let tt = tiny();
+        let mut r = Raptor::new(&tt);
+        // at stop 0 exactly at 7:15: no slack catches the 7:15 trip
+        r.run(&tt, &[true, true], [(0, 7 * 3600 + 900)], 5, 1.0, 0, u32::MAX);
+        assert_eq!(r.arrival(2), Some(7 * 3600 + 900 + 1200));
+        // with a minute of slack it is the 7:30 trip
+        r.run(&tt, &[true, true], [(0, 7 * 3600 + 900)], 5, 1.0, 60, u32::MAX);
+        assert_eq!(r.arrival(2), Some(7 * 3600 + 1800 + 1200));
     }
 }

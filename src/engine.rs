@@ -131,6 +131,8 @@ pub struct QueryOpts {
     pub max_secs: u32,
     pub max_rounds: usize,
     pub walk_speed_mps: f64,
+    /// seconds you must be at a stop before a departure to board it
+    pub board_slack_secs: u32,
     /// how far the origin point may be from the walking network
     pub origin_snap_max_m: f64,
 }
@@ -143,6 +145,7 @@ impl Default for QueryOpts {
             max_secs: 45 * 60,
             max_rounds: 6,
             walk_speed_mps: 1.3,
+            board_slack_secs: 0,
             origin_snap_max_m: 500.0,
         }
     }
@@ -206,7 +209,7 @@ impl<'a> Query<'a> {
 
         // 2. ride
         let active = self.active_services(opts.date).to_vec();
-        self.raptor.run(&e.tt, &active, sources, opts.max_rounds, pace, limit);
+        self.raptor.run(&e.tt, &active, sources, opts.max_rounds, pace, opts.board_slack_secs, limit);
 
         // 3. walk from every reached stop (and the origin) to every node in reach
         let mut sources: Vec<(u32, u32)> = vec![(origin, start)];

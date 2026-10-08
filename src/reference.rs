@@ -69,7 +69,7 @@ impl Reference {
     }
 
     /// Earliest arrival at every feed stop, or UNREACHED.
-    pub fn run(&self, active: &[bool], sources: &[(u32, u32)], walk_pace: f64, limit: u32) -> Vec<u32> {
+    pub fn run(&self, active: &[bool], sources: &[(u32, u32)], walk_pace: f64, board_slack: u32, limit: u32) -> Vec<u32> {
         let mut best = vec![UNREACHED; self.stop_count];
         let mut done = vec![false; self.stop_count];
         let mut heap = BinaryHeap::new();
@@ -96,7 +96,7 @@ impl Reference {
             for &(ti, pos) in &self.by_stop[s as usize] {
                 let trip = &self.trips[ti as usize];
                 let pos = pos as usize;
-                if !active[trip.service as usize] || !trip.board[pos] || trip.dep[pos] < t {
+                if !active[trip.service as usize] || !trip.board[pos] || trip.dep[pos] < t + board_slack {
                     continue;
                 }
                 for j in pos + 1..trip.stops.len() {
@@ -141,11 +141,12 @@ impl<'a> Harness<'a> {
         sources: &[(u32, u32)],
         max_rounds: usize,
         walk_pace: f64,
+        board_slack: u32,
         limit: u32,
     ) -> Vec<(u32, u32, u32)> {
-        raptor.run(self.tt, active, sources.iter().copied(), max_rounds, walk_pace, limit);
+        raptor.run(self.tt, active, sources.iter().copied(), max_rounds, walk_pace, board_slack, limit);
         let feed_sources: Vec<(u32, u32)> = sources.iter().map(|&(s, t)| (self.feed_stop[s as usize], t)).collect();
-        let truth = self.reference.run(active, &feed_sources, walk_pace, limit);
+        let truth = self.reference.run(active, &feed_sources, walk_pace, board_slack, limit);
         (0..self.tt.stops.len() as u32)
             .filter_map(|s| {
                 let a = raptor.arrival(s).unwrap_or(crate::raptor::UNREACHED);
@@ -262,11 +263,12 @@ mod tests {
                     .collect();
                 let start = sources.iter().map(|s| s.1).min().unwrap();
                 let limit = start + rng.random_range(600..4 * 3600);
-                let bad = harness.compare(&mut raptor, &active, &sources, 100, 1.0 / 1.3, limit);
+                let slack = [0, 0, 30, 60][rng.random_range(0..4)];
+                let bad = harness.compare(&mut raptor, &active, &sources, 100, 1.0 / 1.3, slack, limit);
                 compared += tt.stops.len();
                 if !bad.is_empty() {
                     mismatches += bad.len();
-                    eprintln!("sources {sources:?} active {active:?} limit {limit}: {:?}", &bad[..bad.len().min(5)]);
+                    eprintln!("sources {sources:?} active {active:?} slack {slack} limit {limit}: {:?}", &bad[..bad.len().min(5)]);
                 }
             }
         }
@@ -285,7 +287,7 @@ mod tests {
         let mut raptor = Raptor::new(&tt);
         for _ in 0..100 {
             let sources = vec![(rng.random_range(0..tt.stops.len()) as u32, 7 * 3600 + rng.random_range(0..7200))];
-            for (_, a, b) in harness.compare(&mut raptor, &[true, true], &sources, 1, 1.0 / 1.3, u32::MAX) {
+            for (_, a, b) in harness.compare(&mut raptor, &[true, true], &sources, 1, 1.0 / 1.3, 0, u32::MAX) {
                 assert!(a >= b, "one round found {a}, brute force {b}");
             }
         }
@@ -318,7 +320,7 @@ mod debug_tests {
                     .collect();
                 let start = sources.iter().map(|s| s.1).min().unwrap();
                 let limit = start + rng.random_range(600..4 * 3600);
-                let bad = harness.compare(&mut raptor, &active, &sources, 100, 1.0 / 1.3, limit);
+                let bad = harness.compare(&mut raptor, &active, &sources, 100, 1.0 / 1.3, 0, limit);
                 if !bad.is_empty() {
                     println!("feed {feed_no} query {q}: sources {sources:?} active {active:?} limit {limit}");
                     println!("mismatches (tt stop, raptor, brute): {bad:?}");

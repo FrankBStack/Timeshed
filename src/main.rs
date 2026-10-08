@@ -66,6 +66,9 @@ enum Cmd {
         /// Walking speed in m/s
         #[arg(long, default_value_t = 1.3)]
         walk_speed: f64,
+        /// Seconds you must be at a stop before departure to board
+        #[arg(long, default_value_t = 0)]
+        board_slack: u32,
         /// Write the isochrone bands as GeoJSON to this file
         #[arg(long)]
         geojson: Option<PathBuf>,
@@ -113,6 +116,9 @@ enum Cmd {
         /// Walking speed in m/s
         #[arg(long, default_value_t = 1.3)]
         walk_speed: f64,
+        /// Seconds you must be at a stop before departure to board
+        #[arg(long, default_value_t = 0)]
+        board_slack: u32,
         /// Output CSV
         #[arg(short, long)]
         out: PathBuf,
@@ -140,6 +146,9 @@ enum Cmd {
         /// Walking speed in m/s
         #[arg(long, default_value_t = 1.3)]
         walk_speed: f64,
+        /// Seconds you must be at a stop before departure to board
+        #[arg(long, default_value_t = 0)]
+        board_slack: u32,
         /// Output CSV: origin,dest,seconds (unreachable pairs are omitted)
         #[arg(short, long)]
         out: PathBuf,
@@ -213,11 +222,11 @@ fn main() -> Result<()> {
             engine.save(&out)?;
             log::info!("wrote {} in {:.1?}", out.display(), t0.elapsed());
         }
-        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed, geojson } => {
+        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed, board_slack, geojson } => {
             let t0 = std::time::Instant::now();
             let engine = Engine::load(&bundle)?;
             log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
-            let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() };
+            let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, board_slack_secs: board_slack, ..Default::default() };
             let mut q = Query::new(&engine);
             let t1 = std::time::Instant::now();
             if !q.run(lat, lon, &opts) {
@@ -260,7 +269,7 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(server::serve(engine, web, addr))?;
         }
-        Cmd::Access { bundle, origins, dests, date, times, from, to, every, max, walk_speed, out } => {
+        Cmd::Access { bundle, origins, dests, date, times, from, to, every, max, walk_speed, board_slack, out } => {
             let mut departures: Vec<u32> = times.iter().map(|t| time_arg(t)).collect::<Result<_>>()?;
             if let (Some(from), Some(to)) = (from, to) {
                 let (mut t, end) = (time_arg(&from)?, time_arg(&to)?);
@@ -284,7 +293,7 @@ fn main() -> Result<()> {
                 dests.names
             );
             let opts = AccessOpts {
-                base: QueryOpts { date, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() },
+                base: QueryOpts { date, max_secs: max * 60, walk_speed_mps: walk_speed, board_slack_secs: board_slack, ..Default::default() },
                 departures,
                 dest_snap_max_m: 500.0,
             };
@@ -293,7 +302,7 @@ fn main() -> Result<()> {
             let off = rows.iter().filter(|r| !r.on_network).count() / opts.departures.len().max(1);
             log::info!("wrote {} rows to {} ({off} origins off the network) in {:.1?}", rows.len(), out.display(), t0.elapsed());
         }
-        Cmd::Matrix { bundle, origins, dests, date, time, max, walk_speed, out } => {
+        Cmd::Matrix { bundle, origins, dests, date, time, max, walk_speed, board_slack, out } => {
             let t0 = std::time::Instant::now();
             let engine = Engine::load(&bundle)?;
             let origins = access::read_origins(&origins)?;
@@ -301,7 +310,7 @@ fn main() -> Result<()> {
                 .into_iter()
                 .map(|o| access::Dest { id: o.id, lat: o.lat, lon: o.lon, weights: vec![] })
                 .collect::<Vec<_>>();
-            let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, ..Default::default() };
+            let opts = QueryOpts { date, depart: time_arg(&time)?, max_secs: max * 60, walk_speed_mps: walk_speed, board_slack_secs: board_slack, ..Default::default() };
             let m = access::matrix(&engine, &origins, &dests, &opts, 500.0);
             let mut w = csv::Writer::from_path(&out)?;
             w.write_record(["origin", "dest", "seconds"])?;
@@ -332,7 +341,7 @@ fn main() -> Result<()> {
             log::info!("{queries} random queries over {} stops, dates {first}..{last}, {max} min budget", tt.stops.len());
 
             // one query spec per seed so runs are reproducible and parallel
-            let specs: Vec<(chrono::NaiveDate, Vec<(u32, u32)>)> = (0..queries as u64)
+            let specs: Vec<(chrono::NaiveDate, Vec<(u32, u32)>, u32)> = (0..queries as u64)
                 .map(|i| {
                     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(1_000_003).wrapping_add(i));
                     let date = first + chrono::Days::new(rng.random_range(0..=days));
@@ -341,7 +350,8 @@ fn main() -> Result<()> {
                     let sources = (0..n)
                         .map(|_| (rng.random_range(0..tt.stops.len()) as u32, start + rng.random_range(0..600)))
                         .collect();
-                    (date, sources)
+                    let slack = [0, 0, 30, 60][rng.random_range(0..4)];
+                    (date, sources, slack)
                 })
                 .collect();
 
@@ -352,13 +362,13 @@ fn main() -> Result<()> {
                 .enumerate()
                 .map_init(
                     || (Raptor::new(tt), Raptor::new(tt)),
-                    |(raptor, capped), (i, (date, sources))| {
+                    |(raptor, capped), (i, (date, sources, slack))| {
                         let active = tt.services.active(*date);
                         let start = sources.iter().map(|s| s.1).min().unwrap();
                         let limit = start + max * 60;
-                        let bad = harness.compare(raptor, &active, sources, 100, pace, limit);
+                        let bad = harness.compare(raptor, &active, sources, 100, pace, *slack, limit);
                         // how much does the default round cap cost?
-                        capped.run(tt, &active, sources.iter().copied(), QueryOpts::default().max_rounds, pace, limit);
+                        capped.run(tt, &active, sources.iter().copied(), QueryOpts::default().max_rounds, pace, *slack, limit);
                         let reached = raptor.reached().count();
                         let lost = (0..tt.stops.len() as u32)
                             .filter(|&s| raptor.arrival(s) != capped.arrival(s))
@@ -379,7 +389,7 @@ fn main() -> Result<()> {
                     mismatches += bad.len();
                     if shown < 10 {
                         shown += 1;
-                        let (date, sources) = &specs[*i];
+                        let (date, sources, _) = &specs[*i];
                         let (s, a, b) = bad[0];
                         println!(
                             "MISMATCH query {i} on {date} from {:?}: stop {} ({}) raptor={} brute={} (+{} more)",
