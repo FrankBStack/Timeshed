@@ -72,6 +72,13 @@ pub struct Timetable {
     pub trip_ids: Vec<String>,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct GroupKey {
+    route: u32,
+    stops: Vec<u32>,
+    flags: Vec<(bool, bool)>,
+}
+
 /// One trip ready for grouping: its stop sequence and stop events.
 struct TripInstance {
     gtfs_trip: u32,
@@ -144,10 +151,18 @@ impl Timetable {
             }
         }
 
-        // Group by (gtfs route, exact stop sequence).
-        let mut groups: HashMap<(u32, Vec<u32>), Vec<usize>> = HashMap::new();
+        // Group by (gtfs route, exact stop sequence, board/alight pattern).
+        // The flags matter: RAPTOR boards the earliest catchable trip and
+        // assumes no later trip on the route can do better, which is false
+        // if the earliest trip refuses to let you off where a later one does.
+        let mut groups: HashMap<GroupKey, Vec<usize>> = HashMap::new();
         for (i, inst) in instances.iter().enumerate() {
-            groups.entry((inst.gtfs_route, inst.stops.clone())).or_default().push(i);
+            let key = GroupKey {
+                route: inst.gtfs_route,
+                stops: inst.stops.clone(),
+                flags: inst.events.iter().map(|e| (e.board, e.alight)).collect(),
+            };
+            groups.entry(key).or_default().push(i);
         }
         let mut keys: Vec<_> = groups.keys().cloned().collect();
         keys.sort(); // deterministic route numbering
@@ -193,7 +208,7 @@ impl Timetable {
                                 "trip {} overtakes {} at stop {} ({} vs {})",
                                 feed.trips[instances[i].gtfs_trip as usize].id,
                                 feed.trips[instances[last].gtfs_trip as usize].id,
-                                stops[key.1[pos] as usize].gtfs_id,
+                                stops[key.stops[pos] as usize].gtfs_id,
                                 crate::gtfs::format_time(instances[i].events[pos].arr),
                                 crate::gtfs::format_time(instances[last].events[pos].arr),
                             );
@@ -205,14 +220,14 @@ impl Timetable {
                     split_count += 1;
                 }
                 first = false;
-                let stops = key.1.clone();
+                let stops = key.stops.clone();
                 let mut events = Vec::with_capacity(chain.len() * stops.len());
                 let mut trips = Vec::with_capacity(chain.len());
                 for &i in &chain {
                     events.extend_from_slice(&instances[i].events);
                     trips.push(TripRef { gtfs_trip: instances[i].gtfs_trip, service: instances[i].service });
                 }
-                routes.push(Route { info: key.0, stops, trips, events });
+                routes.push(Route { info: key.route, stops, trips, events });
                 pending = rest;
             }
         }
