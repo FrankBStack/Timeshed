@@ -5,6 +5,12 @@
 //! Each round scans only the routes that pass through stops improved in the
 //! previous round, from the earliest such stop onwards, hopping onto the
 //! earliest catchable trip and then relaxing footpaths.
+//!
+//! The paper assumes footpaths are transitively closed. Ours come from a
+//! bounded walking search, so they are not: footpaths are relaxed with a
+//! worklist until nothing improves, which makes chains of short walks legal
+//! and the result independent of iteration order. The same relaxation runs
+//! from the sources before the first round.
 
 use crate::timetable::Timetable;
 
@@ -23,6 +29,7 @@ pub struct Raptor {
     /// earliest boarding position per route in the current round
     route_pos: Vec<u32>,
     queue: Vec<u32>,
+    footpath_queue: Vec<u32>,
 }
 
 impl Raptor {
@@ -36,6 +43,25 @@ impl Raptor {
             touched: Vec::new(),
             route_pos: vec![u32::MAX; tt.routes.len()],
             queue: Vec::new(),
+            footpath_queue: Vec::new(),
+        }
+    }
+
+    /// Relax footpaths from every currently marked stop, and from any stop
+    /// that improves as a result, until nothing changes.
+    fn relax_footpaths(&mut self, tt: &Timetable, walk_pace: f64, limit: u32) {
+        self.footpath_queue.clear();
+        self.footpath_queue.extend_from_slice(&self.marked_list);
+        while let Some(s) = self.footpath_queue.pop() {
+            let from = self.best[s as usize];
+            let legs = self.legs[s as usize];
+            for &(to, meters) in &tt.transfers[s as usize] {
+                let t = from + (meters as f64 * walk_pace).round() as u32;
+                if t <= limit && t < self.best[to as usize] {
+                    self.improve(to, t, legs);
+                    self.footpath_queue.push(to);
+                }
+            }
         }
     }
 
@@ -81,6 +107,7 @@ impl Raptor {
                 self.improve(s, t, 0);
             }
         }
+        self.relax_footpaths(tt, walk_pace, limit);
 
         for round in 1..=max_rounds {
             // Labels from the previous round are what we can board with.
@@ -150,17 +177,7 @@ impl Raptor {
             }
 
             // Footpaths from stops improved this round.
-            let marked_now: Vec<u32> = self.marked_list.clone();
-            for s in marked_now {
-                let from = self.best[s as usize];
-                let legs = self.legs[s as usize];
-                for &(to, meters) in &tt.transfers[s as usize] {
-                    let t = from + (meters as f64 * walk_pace).round() as u32;
-                    if t <= limit && t < self.best[to as usize] {
-                        self.improve(to, t, legs);
-                    }
-                }
-            }
+            self.relax_footpaths(tt, walk_pace, limit);
 
             if self.marked_list.is_empty() {
                 break;
