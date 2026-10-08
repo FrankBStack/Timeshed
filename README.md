@@ -109,6 +109,12 @@ includes part-time and student workers.)
   midnight–2 am window; no next-morning trips are needed before 4 am.
 - No boarding slack: a bus that leaves the second you reach the stop counts as
   caught. r5 and OpenTripPlanner assume a minute of slack; `--board-slack` turns it on.
+  Rerunning all five windows with 60 s of slack lowers the absolute numbers by 10 to
+  16% (the weekday-morning median falls from 104,226 to 87,900 jobs; the share of
+  residents reaching 100,000+ from 51% to 46%) but barely moves the comparison between
+  windows: access kept until midnight goes from 79% to 81%, and after midnight from
+  41% to 43%. Read the levels as optimistic by about that much; the shape of the
+  finding does not depend on the choice.
 - Jobs are counted at the block they are in, reached if the block's internal point is
   reachable. Jobs outside the walking bounding box, and transit run by neighbouring
   counties' systems, are not included. The Hop streetcar is a separate feed and is not
@@ -200,8 +206,8 @@ that leaves within a minute of your arrival at the stop. Adding the same rule
 where the two routers attach a point to the street network differently. r5
 reports whole minutes, which is where the +0.5 median comes from.
 
-The analysis above uses no boarding slack, so its travel times are a hair
-optimistic by r5's standard. It makes no visible difference to the findings.
+The analysis above uses no boarding slack, so its travel times are optimistic by
+r5's standard; the caveats under the finding quantify by how much.
 
 ### The browser build
 
