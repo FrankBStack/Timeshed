@@ -17,7 +17,7 @@ to the door. Because the schedule is real, 8 am and 11 pm give different shapes.
 <https://timeshed.frankbs.dev/live/>. The same Rust engine is compiled
 to WebAssembly and runs in a web worker; the page downloads a 7 MB bundle (the
 whole county's schedule and walking network) once, then answers each drag in
-about 100 ms with no server involved.
+about 140 ms with no server involved.
 
 Everything is built from two free sources: the [MCTS GTFS feed](https://kamino.mcts.org/gtfs/google_transit.zip)
 and the [Geofabrik Wisconsin extract](https://download.geofabrik.de/north-america/us/wisconsin.html).
@@ -57,6 +57,13 @@ All figures are population weighted.
 
 ![Jobs reachable within 45 minutes, by departure window](docs/figures/jobs_by_time_of_day.png)
 
+![Share of residents by jobs reachable, one curve per departure window](docs/figures/residents_by_access.png)
+
+The interactive version, with every block hoverable and each window selectable, is in
+[`docs/`](docs/) and published at <https://timeshed.frankbs.dev/>.
+The per-block table is written to `data/analysis/access_by_block.csv` by the analysis
+script.
+
 ### Who loses after midnight
 
 The obvious follow-up is whether the people who work nights are the ones left
@@ -91,13 +98,6 @@ can get to a night shift depends on whether you happen to live on one of them.
 (`analysis/night_shift.py`; "low-wage" is LODES earnings band CE01, which also
 includes part-time and student workers.)
 
-![Share of residents by jobs reachable, one curve per departure window](docs/figures/residents_by_access.png)
-
-The interactive version, with every block hoverable and each window selectable, is in
-[`docs/`](docs/) and published at <https://timeshed.frankbs.dev/>.
-The per-block table is written to `data/analysis/access_by_block.csv` by the analysis
-script.
-
 ### Caveats
 
 - Schedules, not real time. A 45-minute budget on paper is a 45-minute budget on a day
@@ -120,12 +120,16 @@ script.
 ```
 GTFS zip ──> gtfs.rs ──> timetable.rs ──┐
                                         ├──> engine.rs (snap stops, build footpaths) ──> bundle.bin
-OSM .pbf ──> osm.rs  ──> walk.rs ───────┘
-                                                          │
+OSM .pbf ──> osm.rs  ──> walk.rs ───────┘                                                  │
+                                                          ┌────────────────────────────────┘
          query:  walk (Dijkstra) ──> raptor.rs ──> walk (multi-source Dijkstra)
+                                        │                 │
+                 reference.rs: brute force, checks raptor.rs on random feeds and the real one
                                                           │
          isochrone.rs: node labels ──> 100 m grid ──> marching squares ──> GeoJSON bands
          access.rs:    node labels ──> destination blocks ──> weighted sums, in parallel
+         wasm.rs:      the same query + isochrone.rs behind wasm-bindgen, for the browser
+         server.rs:    the same behind axum, for `timeshed serve`
 ```
 
 - **Timetable.** GTFS routes are regrouped into RAPTOR routes: trips that share an
@@ -135,8 +139,9 @@ OSM .pbf ──> osm.rs  ──> walk.rs ───────┘
   Service is resolved per date from `calendar.txt` and `calendar_dates.txt`.
 - **Walking graph.** Two passes over the state extract: node coordinates inside the
   bounding box (the stops' box plus 2.5 km), then ways a pedestrian can use. Ways
-  leaving the box are cut at its edge; only the largest connected component is kept.
-  Milwaukee County comes out at 593k nodes and 1.5M directed edges.
+  leaving the box are cut at its edge; only the largest connected component is kept;
+  runs of shape nodes are merged into single edges of at most 150 m. Milwaukee County
+  reads as 593k nodes and ends up at 259k nodes and 818k directed edges.
 - **RAPTOR.** Standard round-based scan with per-round labels, local pruning against the
   best-known arrival and a time budget, binary search for the first catchable trip
   (valid because routes are non-overtaking), and footpaths relaxed to a fixed point
@@ -222,13 +227,12 @@ page instead.
 
 | Step | Time |
 |---|---:|
-| Read the feed (1.0M stop_times) | 0.5 s |
-| Walking graph from the 294 MB state extract | 1.9 s |
-| Full bundle build, including 106k footpaths | 2.6 s |
-| Door-to-door query, 45-minute budget | ~20 ms |
-| 60-minute isochrone with bands, as GeoJSON | ~90 ms |
+| Read the feed (1.0M stop_times) | 0.6 s |
+| Full bundle build: walking graph from the 294 MB state extract, contraction, 106k footpaths | ~3 s |
+| Door-to-door query, 45-minute budget | ~13 ms |
+| 60-minute isochrone: 21 ms routing + 41 ms of bands, as GeoJSON | ~60 ms |
 | Batch: 10,690 origins × 12 departures | ~110 s |
-| Same 60-minute isochrone, WebAssembly in Brave | ~130 ms |
+| Same 60-minute isochrone, WebAssembly in Brave, including drawing | ~140 ms |
 
 ## Running it
 
