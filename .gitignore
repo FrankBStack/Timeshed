@@ -4,3 +4,4 @@
 .DS_Store
 analysis/.venv
 __pycache__/
+.wrangler/
