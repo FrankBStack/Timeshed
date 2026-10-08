@@ -103,6 +103,27 @@ OSM .pbf ──> osm.rs  ──> walk.rs ───────┘
   destination's node. Rayon runs origins in parallel with one query workspace per
   thread.
 
+### How I know the router is right
+
+RAPTOR is easy to get subtly wrong, so there is a second router that is easy to
+get right: a plain time-dependent Dijkstra over stops on the raw feed, with no
+route grouping, no rounds and no pruning (`src/reference.rs`). Two checks run
+against it:
+
+- `cargo test` builds 200 random feeds with loops, short-turns, frequency-based
+  trips, no-pickup and no-drop-off stops, two service patterns and random
+  footpaths, and compares every stop label from RAPTOR with brute force over
+  10,000 queries.
+- `timeshed verify` does the same on a real bundle. On the Milwaukee feed, 5,000
+  random queries (one to three origin stops, any date in the feed, any hour,
+  90-minute budget) compared 17 million reached stop labels with zero
+  disagreements, and the default cap of six transit legs lost none of them.
+
+The property test earned its keep immediately: it caught the earliest-trip
+assumption breaking when the first catchable trip refuses to let you off at a
+stop where a later trip on the same stop sequence does. Routes are now grouped
+by board/alight pattern as well as stop sequence.
+
 ### Numbers on a 12-core laptop
 
 | Step | Time |
