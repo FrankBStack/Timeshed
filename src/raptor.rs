@@ -94,6 +94,7 @@ impl Raptor {
     /// meter for footpaths. `board_slack` is how many seconds before a
     /// departure you must be at the stop to board it. No label above
     /// `limit` is kept.
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &mut self,
         tt: &Timetable,

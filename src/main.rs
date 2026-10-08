@@ -344,7 +344,10 @@ fn main() -> Result<()> {
             log::info!("{queries} random queries over {} stops, dates {first}..{last}, {max} min budget", tt.stops.len());
 
             // one query spec per seed so runs are reproducible and parallel
-            let specs: Vec<(chrono::NaiveDate, Vec<(u32, u32)>, u32)> = (0..queries as u64)
+            type Spec = (chrono::NaiveDate, Vec<(u32, u32)>, u32);
+            /// (query index, mismatches, labels reached, labels lost to the round cap)
+            type Outcome = (usize, Vec<(u32, u32, u32)>, usize, usize);
+            let specs: Vec<Spec> = (0..queries as u64)
                 .map(|i| {
                     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(1_000_003).wrapping_add(i));
                     let date = first + chrono::Days::new(rng.random_range(0..=days));
@@ -360,7 +363,7 @@ fn main() -> Result<()> {
 
             let t0 = std::time::Instant::now();
             let pace = 1.0 / 1.3;
-            let results: Vec<(usize, Vec<(u32, u32, u32)>, usize, usize)> = specs
+            let results: Vec<Outcome> = specs
                 .par_iter()
                 .enumerate()
                 .map_init(

@@ -277,8 +277,7 @@ mod tests {
 
     #[test]
     fn groups_by_stop_sequence_and_splits_overtakers() {
-        let mut feed = Feed::default();
-        feed.stops = (0..3).map(stop).collect();
+        let mut feed = Feed { stops: (0..3).map(stop).collect(), ..Default::default() };
         feed.routes.push(GRoute { id: "R".into(), short_name: "R".into(), long_name: String::new(), route_type: 3, color: None });
         feed.services.ids.push("wk".into());
         for i in 0..4 {

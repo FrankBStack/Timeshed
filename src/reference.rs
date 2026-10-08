@@ -134,6 +134,7 @@ impl<'a> Harness<'a> {
 
     /// Run both routers from `sources` (timetable stop indices) and return
     /// the timetable stops where they disagree, as (stop, raptor, reference).
+    #[allow(clippy::too_many_arguments)]
     pub fn compare(
         &self,
         raptor: &mut crate::raptor::Raptor,
@@ -223,11 +224,11 @@ pub(crate) mod tests_helpers {
 
     pub fn random_transfers(rng: &mut StdRng, n: usize) -> Vec<Vec<(u32, f32)>> {
         let mut t = vec![Vec::new(); n];
-        for s in 0..n {
+        for (s, list) in t.iter_mut().enumerate() {
             for _ in 0..rng.random_range(0..4) {
                 let to = rng.random_range(0..n);
                 if to != s {
-                    t[s].push((to as u32, rng.random_range(50.0..900.0)));
+                    list.push((to as u32, rng.random_range(50.0..900.0)));
                 }
             }
         }
