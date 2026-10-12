@@ -1,0 +1,83 @@
+name: site
+# Builds and deploys the site: downloads the agency's current schedule, reuses a
+# monthly-cached OSM extract, rebuilds the bundle and the wasm, renders the pages,
+# and ships docs/ to Cloudflare Pages. Runs on relevant pushes, every Monday so a
+# new schedule is picked up, and on demand. Refuses to deploy a feed that does not
+# cover the coming week, so an expiring feed fails loudly instead of leaving the
+# live map routing nothing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "scripts/**"
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/data/**"
+      - "docs/figures/**"
+      - "docs/_headers"
+      - ".github/workflows/site.yml"
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+env:
+  GTFS_URL: https://kamino.mcts.org/gtfs/google_transit.zip
+  OSM_URL: https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf
+  BUNDLE_NAME: Milwaukee County Transit
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+      - name: Month stamp for the OSM cache
+        id: month
+        run: echo "stamp=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - name: Cache the OSM extract, refreshed monthly
+        id: osm
+        uses: actions/cache@v4
+        with:
+          path: data/raw/osm/wisconsin-latest.osm.pbf
+          key: osm-wisconsin-${{ steps.month.outputs.stamp }}
+      - name: Download the OSM extract
+        if: steps.osm.outputs.cache-hit != 'true'
+        run: mkdir -p data/raw/osm && curl -fsSL "$OSM_URL" -o data/raw/osm/wisconsin-latest.osm.pbf
+      - name: Download the current GTFS feed
+        run: mkdir -p data/raw/gtfs && curl -fsSL "$GTFS_URL" -o data/raw/gtfs/feed.zip
+      - name: Build the engine
+        run: cargo build --release
+      - name: Check the feed covers today and a week out
+        run: |
+          for days in 0 7; do
+            d=$(date -u -d "+$days days" +%F)
+            line=$(./target/release/timeshed inspect data/raw/gtfs/feed.zip --date "$d" | tail -1)
+            echo "$line"
+            trips=$(echo "$line" | sed -nE 's/.*services, ([0-9]+) trips.*/\1/p')
+            if [ -z "$trips" ] || [ "$trips" -lt 100 ]; then
+              echo "::error::the feed has ${trips:-0} trips on $d; not deploying"
+              exit 1
+            fi
+          done
+      - name: Build the bundle
+        run: ./target/release/timeshed build --gtfs data/raw/gtfs/feed.zip --osm data/raw/osm/wisconsin-latest.osm.pbf --name "$BUNDLE_NAME" -o bundle.bin
+      - name: Render the site
+        run: scripts/build-web.sh bundle.bin
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs --project-name=timeshed --branch=main
