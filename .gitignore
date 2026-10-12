@@ -5,3 +5,13 @@
 analysis/.venv
 __pycache__/
 .wrangler/
+
+# the published site is built by .github/workflows/site.yml; only its inputs are committed
+docs/index.html
+docs/findings/
+docs/live/
+docs/app.js
+docs/style.css
+docs/worker.js
+docs/pkg/
+docs/bundle/
