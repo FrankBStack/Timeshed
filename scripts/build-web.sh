@@ -20,7 +20,9 @@ wasm-pack build --target web --release --out-dir web/pkg --out-name timeshed --n
 rm -rf docs/live && mkdir -p docs/live/pkg
 cp web/index.html web/style.css web/app.js web/worker.js docs/live/
 cp web/pkg/timeshed.js web/pkg/timeshed_bg.wasm docs/live/pkg/
-# the published page reads its bundle from the release asset
+# the published page links back to the results map, which the dev server does not have
+sed -i '' 's|door to door.</p>|door to door.</p>\n    <p class="hint"><a href="../">See the finding: how job access changes by time of day \&rarr;</a></p>|' docs/live/index.html
+# the published page reads its bundle from next to itself
 sed -i '' "s|<script src=\"app.js\"></script>|<script>window.TIMESHED_BUNDLE_URL = '$URL';</script>\n  <script src=\"app.js\"></script>|" docs/live/index.html
 gzip -9 -k -f -c "$BUNDLE" > docs/live/bundle.bin.gz
 ls -la docs/live docs/live/pkg

@@ -54,6 +54,9 @@
     #legend .bar span { flex: 1; }
     #legend .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); margin-top: 3px; }
     #legend .cap { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+    .cta { display: block; margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: var(--accent); color: var(--surface);
+      font-size: 13.5px; font-weight: 600; text-decoration: none; line-height: 1.3; }
+    .cta:hover { filter: brightness(1.08); }
     .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
     .tile { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
     .tile b { display: block; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
@@ -79,6 +82,7 @@
   <aside id="panel">
     <h1>Where can Milwaukee get to work?</h1>
     <p class="sub">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
+    <a class="cta" href="live/">Try the live map: drop a pin anywhere, watch the reachable area redraw &rarr;</a>
     <fieldset>
       <legend>Leaving</legend>
       <div class="opts" id="scenarios"></div>
