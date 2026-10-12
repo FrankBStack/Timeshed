@@ -13,7 +13,7 @@ root = Path(__file__).resolve().parent.parent
 template = (root / "web" / "index.html").read_text()
 SITE = "https://timeshed.frankbs.dev/"
 # build-web.sh passes the hashed asset paths it just wrote under docs/
-BUNDLE, PKG = sys.argv[1], sys.argv[2]
+BUNDLE, PKG, APP, STYLE, WORKER = sys.argv[1:6]
 BUNDLE_BYTES = (root / "docs" / BUNDLE).stat().st_size
 
 
@@ -29,13 +29,12 @@ def og(title, description, url):
 
 
 def render(base, mode, title, og_tags):
-    cfg = {"base": base, "mode": mode, "bundleUrl": BUNDLE, "pkgUrl": PKG, "bundleBytes": BUNDLE_BYTES,
+    cfg = {"base": base, "mode": mode, "bundleUrl": BUNDLE, "pkgUrl": PKG, "workerUrl": WORKER, "bundleBytes": BUNDLE_BYTES,
            "findings": {"blocks": "data/blocks.geojson", "summary": "data/summary.json"}}
     page = template.replace("  <!-- OG -->", og_tags)
     page = page.replace("  <!-- CONFIG -->", f"  <script>window.TIMESHED = {json.dumps(cfg)};</script>")
     page = page.replace("<title>Timeshed</title>", f"<title>{title}</title>")
-    for asset in ["style.css", "app.js"]:
-        page = page.replace(f'"{asset}"', f'"{base}{asset}"')
+    page = page.replace('"style.css"', f'"{base}{STYLE}"').replace('"app.js"', f'"{base}{APP}"')
     return page
 
 

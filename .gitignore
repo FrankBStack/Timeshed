@@ -10,8 +10,6 @@ __pycache__/
 docs/index.html
 docs/findings/
 docs/live/
-docs/app.js
-docs/style.css
-docs/worker.js
+docs/assets/
 docs/pkg/
 docs/bundle/

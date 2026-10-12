@@ -1,13 +1,21 @@
-# Cloudflare Pages headers. Everything is short-lived by default so a redeploy
-# takes effect within minutes; the wasm and the bundle sit under content-hashed
-# paths and can be cached for a year. Later, more specific rules win.
+# Cloudflare Pages headers. Pages are short-lived so a deploy takes effect within
+# minutes; everything they reference lives under a content-hashed path and is
+# cached for a year. A later rule appends rather than replaces, so the general
+# Cache-Control is detached (!) before the specific one is set.
 /*
   Cache-Control: public, max-age=300
-/data/*
-  Cache-Control: public, max-age=86400
-/figures/*
-  Cache-Control: public, max-age=86400
+/assets/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable
 /pkg/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
 /bundle/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
+/data/*
+  ! Cache-Control
+  Cache-Control: public, max-age=86400
+/figures/*
+  ! Cache-Control
+  Cache-Control: public, max-age=86400

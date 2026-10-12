@@ -5,7 +5,7 @@
 // page names a bundle, through the same engine compiled to wasm in a worker.
 // Findings only appear when the page says where the block data is.
 
-const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, pkgUrl: 'pkg/timeshed.js', bundleBytes: 0, findings: null }, window.TIMESHED || {});
+const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, pkgUrl: 'pkg/timeshed.js', workerUrl: 'worker.js', bundleBytes: 0, findings: null }, window.TIMESHED || {});
 const $ = (id) => document.getElementById(id);
 
 // ----------------------------------------------------------------- theme --
@@ -128,7 +128,7 @@ function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
 
 let backend = null;
 function getBackend() {
-  if (!backend) backend = CFG.bundleUrl ? wasmBackend(CFG.base + CFG.bundleUrl, CFG.base + CFG.pkgUrl, CFG.base + 'worker.js') : httpBackend();
+  if (!backend) backend = CFG.bundleUrl ? wasmBackend(CFG.base + CFG.bundleUrl, CFG.base + CFG.pkgUrl, CFG.base + CFG.workerUrl) : httpBackend();
   return backend;
 }
 
