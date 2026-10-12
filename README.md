@@ -209,6 +209,11 @@ scripts/build-web.sh data/bundles/milwaukee.bin && (cd docs && python3 -m http.s
 Reproducing the analysis, from the census downloads to the figures, is in
 [`analysis/README.md`](analysis/README.md). The `data/` directory is not committed.
 
+The published site is not committed either: `.github/workflows/site.yml` downloads
+the agency's current schedule, rebuilds the bundle and the wasm, renders the pages
+and deploys them to Cloudflare Pages on every relevant push and every Monday, and
+refuses to deploy a feed that does not cover the coming week.
+
 ## Layout
 
 ```
@@ -220,7 +225,7 @@ src/raptor.rs      the algorithm               src/reference.rs  brute-force rou
 src/wasm.rs        browser bindings            web/              the map (MapLibre), worker
 scripts/           build-web.sh and render-pages.py assemble the site
 analysis/          census + LODES prep, summary, figures, r5 cross-check
-docs/              the published site: one page with Explore and Findings, figures, data
+docs/              inputs to the published site: block data, figures, cache headers
 ```
 
 ## License
