@@ -14,7 +14,7 @@ to the door. Because the schedule is real, 8 am and 11 pm give different shapes.
 ![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday](docs/figures/live_map.png)
 
 **Try it:** the live map runs entirely in your browser at
-<https://timeshed.frankbs.dev/live/>. The same Rust engine is compiled
+<https://timeshed.frankbs.dev/>. The same Rust engine is compiled
 to WebAssembly and runs in a web worker; the page downloads a 7 MB bundle (the
 whole county's schedule and walking network) once, then answers each drag in
 about 140 ms with no server involved.
@@ -60,7 +60,8 @@ All figures are population weighted.
 ![Share of residents by jobs reachable, one curve per departure window](docs/figures/residents_by_access.png)
 
 The interactive version, with every block hoverable and each window selectable, is in
-[`docs/`](docs/) and published at <https://timeshed.frankbs.dev/>.
+[`docs/`](docs/) and published at <https://timeshed.frankbs.dev/findings/>, the
+Findings tab of the same page as the live map.
 The per-block table is written to `data/analysis/access_by_block.csv` by the analysis
 script.
 
@@ -218,7 +219,9 @@ server and rayon sit behind the default `native` feature. `src/wasm.rs` exposes
 the engine through wasm-bindgen with the same JSON shapes as the HTTP API, and
 `web/app.js` picks a backend at load time: the server's `/api` when running
 under `timeshed serve`, or a web worker running the wasm when the page names a
-bundle URL. `scripts/build-web.sh` builds the package and assembles `docs/live`.
+bundle URL. The same page has two modes, Explore (the live engine) and Findings
+(the precomputed block map); each loads its data when first opened.
+`scripts/build-web.sh` builds the package and renders the site into `docs/`.
 
 To make that practical the bundle had to shrink. Coordinates are f32, OSM ids are
 gone, and runs of shape nodes are merged into edges of at most 150 m, which keeps
@@ -257,7 +260,7 @@ cargo run --release -- serve --bundle data/bundles/milwaukee.bin
 
 # the same map as static files that route in the browser (needs wasm-pack)
 scripts/build-web.sh data/bundles/milwaukee.bin && (cd docs && python3 -m http.server 8090)
-# then open http://127.0.0.1:8090/live/
+# then open http://127.0.0.1:8090/
 ```
 
 To reproduce the analysis:
@@ -292,9 +295,9 @@ src/osm.rs         walking graph from PBF      src/access.rs     batch accessibi
 src/walk.rs        r-tree + bounded Dijkstra   src/server.rs     axum API
 src/raptor.rs      the algorithm               src/reference.rs  brute-force router for checking
 src/wasm.rs        browser bindings            web/              live map (MapLibre), worker
-scripts/           build-web.sh assembles the browser build
+scripts/           build-web.sh and render-pages.py assemble the site
 analysis/          census + LODES prep, summary, figures, r5 cross-check
-docs/              published results map, figures, and the browser build in docs/live
+docs/              the published site: one page with Explore and Findings, figures, data
 ```
 
 ## License

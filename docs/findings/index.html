@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where can Milwaukee get to work? · Timeshed</title>
+  <link rel="icon" href="data:,">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Where can Milwaukee get to work?">
+  <meta property="og:description" content="Jobs reachable within 45 minutes by walking and transit from every census block in Milwaukee County, by time of day. The night network keeps 79% of morning access until midnight, 41% after.">
+  <meta property="og:url" content="https://timeshed.frankbs.dev/findings/">
+  <meta property="og:image" content="https://timeshed.frankbs.dev/figures/card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <div id="map"></div>
+  <div class="tip" id="tip"></div>
+  <aside id="panel">
+    <header class="top">
+      <div>
+        <h1>Timeshed</h1>
+        <p id="feed" class="muted">loading…</p>
+      </div>
+      <a class="gh" href="https://github.com/FrankBStack/Timeshed" title="Source on GitHub">GitHub</a>
+    </header>
+    <nav class="tabs" id="tabs" role="tablist" hidden>
+      <button role="tab" data-mode="explore">Explore</button>
+      <button role="tab" data-mode="findings">Findings</button>
+    </nav>
+
+    <section id="explore" role="tabpanel">
+      <p class="hint">Drop a pin anywhere. Everything you can reach on foot plus transit, door to door, redraws as you drag.</p>
+      <div class="row">
+        <label>Date <input type="date" id="date"></label>
+        <label>Leave at <input type="time" id="time" value="08:00" step="300"></label>
+      </div>
+      <label class="slider">Within <output id="cutoff-out">30</output> min
+        <input type="range" id="cutoff" min="5" max="60" step="5" value="30">
+      </label>
+      <div class="legend" id="iso-legend"></div>
+      <p id="stats" class="muted"></p>
+      <p id="error" class="error" hidden></p>
+      <details>
+        <summary>About</summary>
+        <p>Walking network from OpenStreetMap, schedules from the agency's GTFS feed, routed with an
+        own RAPTOR implementation in Rust. Bands are 5 minutes wide; the slider only filters what was
+        already computed, so it is instant. Changing the time or date re-routes.</p>
+        <p id="engine-note" class="muted"></p>
+      </details>
+    </section>
+
+    <section id="findings" role="tabpanel" hidden>
+      <p class="hint">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
+      <fieldset>
+        <legend>Leaving</legend>
+        <div class="opts" id="scenarios"></div>
+      </fieldset>
+      <div class="legend" id="f-legend"></div>
+      <div class="tiles" id="tiles"></div>
+      <details>
+        <summary>How this was made</summary>
+        <p>Each block's value is the mean over departures every 10 minutes across the two-hour window, from the
+        same engine as the Explore tab. Jobs are 2023 LODES workplace counts by block; blocks are 2020 TIGER.
+        The "share of morning" views divide the later value by the morning one.</p>
+        <p>Hover a block for its numbers. The write-up with figures is in the
+        <a href="https://github.com/FrankBStack/Timeshed#readme">README</a>.</p>
+      </details>
+    </section>
+  </aside>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script>window.TIMESHED = {"base": "../", "mode": "findings", "bundleUrl": "bundle.bin.gz", "findings": {"blocks": "data/blocks.geojson", "summary": "data/summary.json"}};</script>
+  <script src="../app.js"></script>
+</body>
+</html>
