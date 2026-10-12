@@ -1,11 +1,16 @@
-# Cloudflare Pages headers. The bundle and wasm are big and change only when
-# the schedule or the engine does; a day keeps repeat visits fast without
-# risking a stale bundle against a newer wasm.
-/bundle.bin.gz
-  Cache-Control: public, max-age=86400
+# Cloudflare Pages headers. The wasm and the bundle sit under content-hashed
+# paths, so they can be cached for a year; the pages that name them are short-lived.
 /pkg/*
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=31536000, immutable
+/bundle/*
+  Cache-Control: public, max-age=31536000, immutable
 /data/*
   Cache-Control: public, max-age=86400
 /*.html
+  Cache-Control: public, max-age=300
+/app.js
+  Cache-Control: public, max-age=300
+/worker.js
+  Cache-Control: public, max-age=300
+/style.css
   Cache-Control: public, max-age=300

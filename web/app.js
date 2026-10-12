@@ -5,7 +5,7 @@
 // page names a bundle, through the same engine compiled to wasm in a worker.
 // Findings only appear when the page says where the block data is.
 
-const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, findings: null }, window.TIMESHED || {});
+const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, pkgUrl: 'pkg/timeshed.js', bundleBytes: 0, findings: null }, window.TIMESHED || {});
 const $ = (id) => document.getElementById(id);
 
 // ----------------------------------------------------------------- theme --
@@ -43,7 +43,7 @@ const state = {
   mode: null, map: null, firstSymbol: undefined,
   // explore
   lat: null, lon: null, marker: null, info: null, exploreReady: false,
-  inFlight: false, queued: false,
+  inFlight: false, queued: false, consented: false,
   // findings
   window: null, share: false, findingsLoaded: false, hovered: null,
 };
@@ -79,8 +79,12 @@ function httpBackend() {
   };
 }
 
-function wasmBackend(bundleUrl, workerUrl) {
-  const worker = new Worker(workerUrl, { type: 'module' });
+function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
+  // Absolute URLs: the worker's own location is not the page's, and a
+  // dynamic import() of a bare "pkg/..." string is a module name, not a path.
+  const abs = (u) => new URL(u, location.href).href;
+  bundleUrl = abs(bundleUrl); pkgUrl = abs(pkgUrl);
+  const worker = new Worker(abs(workerUrl), { type: 'module' });
   const waiting = new Map();
   let nextId = 1;
   const bar = $('progress');
@@ -98,6 +102,9 @@ function wasmBackend(bundleUrl, workerUrl) {
         $('engine-note').textContent =
           `This page downloaded a ${(m.bytes / 1e6).toFixed(0)} MB bundle, the whole county's schedule and walking network, and routes in your browser. No server is involved.`;
         resolve(m.info);
+      } else if (m.type === 'error' && m.id === 'load') {
+        bar.hidden = true;
+        reject(new Error('The routing engine failed to load: ' + m.message));
       } else if (m.type === 'isochrone' || m.type === 'error') {
         const w = waiting.get(m.id);
         waiting.delete(m.id);
@@ -108,7 +115,7 @@ function wasmBackend(bundleUrl, workerUrl) {
     };
     worker.onerror = (e) => reject(new Error(e.message));
   });
-  worker.postMessage({ type: 'load', bundleUrl });
+  worker.postMessage({ type: 'load', bundleUrl, pkgUrl });
   return {
     info() { return ready; },
     async isochrone(params) {
@@ -121,7 +128,7 @@ function wasmBackend(bundleUrl, workerUrl) {
 
 let backend = null;
 function getBackend() {
-  if (!backend) backend = CFG.bundleUrl ? wasmBackend(CFG.base + CFG.bundleUrl, CFG.base + 'worker.js') : httpBackend();
+  if (!backend) backend = CFG.bundleUrl ? wasmBackend(CFG.base + CFG.bundleUrl, CFG.base + CFG.pkgUrl, CFG.base + 'worker.js') : httpBackend();
   return backend;
 }
 
@@ -188,12 +195,35 @@ function applyCutoff() {
   for (const id of ['iso-fill', 'iso-line']) if (state.map.getLayer(id)) state.map.setFilter(id, ['<=', ['get', 'to'], m]);
 }
 
+// People who have asked their browser to save data, or are on a 2G-class
+// connection, get a button instead of an automatic download.
+function connectionWantsToAsk() {
+  const c = navigator.connection;
+  return !!(c && (c.saveData || /(^|-)2g$/.test(c.effectiveType || '')));
+}
+function showLoadGate() {
+  const mb = CFG.bundleBytes ? ` (${(CFG.bundleBytes / 1e6).toFixed(0)} MB)` : '';
+  $('stats').innerHTML = `<button class="load" id="load">Load the routing engine${mb}</button>
+    <span class="muted">You're on a data-saving or slow connection, so the download waits for you.</span>`;
+  $('load').addEventListener('click', () => { state.consented = true; exploreInit(); });
+}
+
 async function exploreInit() {
   if (state.exploreReady) return;
+  if (CFG.bundleUrl && !state.consented && connectionWantsToAsk()) { showLoadGate(); return; }
   state.exploreReady = true;
   const map = state.map;
   $('stats').textContent = 'loading…';
-  const info = await getBackend().info();
+  let info;
+  try {
+    info = await getBackend().info();
+  } catch (err) {
+    state.exploreReady = false;
+    $('stats').textContent = '';
+    $('error').textContent = err.message;
+    $('error').hidden = false;
+    return;
+  }
   state.info = info;
   const h = hashParams();
   if (h.has('t')) $('time').value = h.get('t');

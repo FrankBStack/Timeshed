@@ -6,11 +6,15 @@ site gets the same markup three times: / starts in Explore, /findings/ starts
 in Findings with its own social card, and /live/ redirects to / for old links.
 """
 import json
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
 template = (root / "web" / "index.html").read_text()
 SITE = "https://timeshed.frankbs.dev/"
+# build-web.sh passes the hashed asset paths it just wrote under docs/
+BUNDLE, PKG = sys.argv[1], sys.argv[2]
+BUNDLE_BYTES = (root / "docs" / BUNDLE).stat().st_size
 
 
 def og(title, description, url):
@@ -25,7 +29,7 @@ def og(title, description, url):
 
 
 def render(base, mode, title, og_tags):
-    cfg = {"base": base, "mode": mode, "bundleUrl": "bundle.bin.gz",
+    cfg = {"base": base, "mode": mode, "bundleUrl": BUNDLE, "pkgUrl": PKG, "bundleBytes": BUNDLE_BYTES,
            "findings": {"blocks": "data/blocks.geojson", "summary": "data/summary.json"}}
     page = template.replace("  <!-- OG -->", og_tags)
     page = page.replace("  <!-- CONFIG -->", f"  <script>window.TIMESHED = {json.dumps(cfg)};</script>")

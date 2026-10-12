@@ -51,6 +51,10 @@ h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.2; font-weight: 700; lette
 .field-head .label { margin: 0; }
 .value { font-weight: 600; font-size: 15px; }
 .meta { margin: 10px 0 0; color: var(--ink-2); font-size: 12.5px; }
+.load { display: block; width: 100%; margin: 2px 0 6px; padding: 9px 12px; border: 0; border-radius: 9px; background: var(--accent); color: var(--on-accent);
+  font: inherit; font-weight: 600; cursor: pointer; }
+.load:hover { filter: brightness(1.08); }
+.muted { color: var(--ink-3); font-size: 12px; }
 .error { color: var(--error); font-size: 13px; }
 
 /* time scrubber */

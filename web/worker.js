@@ -1,9 +1,11 @@
 // Runs the routing engine off the main thread. Messages in:
-//   {type: 'load', bundleUrl}            -> progress {type:'progress', loaded, total}, then {type:'ready', info}
+//   {type: 'load', bundleUrl, pkgUrl}    -> progress {type:'progress', loaded, total}, then {type:'ready', info}
 //   {type: 'isochrone', id, params}      -> {type:'isochrone', id, geojson, ms} or {type:'error', id, message}
-import init, { WebEngine } from './pkg/timeshed.js';
+// pkgUrl is the wasm-bindgen glue; the published site hashes its path so it
+// can be cached for a year, so the page tells us where it is.
 
 let engine = null;
+let WebEngine = null;
 
 async function fetchBundle(url) {
   const res = await fetch(url);
@@ -51,7 +53,9 @@ onmessage = async (e) => {
   const msg = e.data;
   try {
     if (msg.type === 'load') {
-      await init();
+      const mod = await import(msg.pkgUrl || './pkg/timeshed.js');
+      await mod.default();
+      WebEngine = mod.WebEngine;
       const bytes = await fetchBundle(msg.bundleUrl);
       const t0 = performance.now();
       engine = new WebEngine(bytes);
@@ -64,6 +68,6 @@ onmessage = async (e) => {
       postMessage({ type: 'isochrone', id: msg.id, geojson, ms: performance.now() - t0 });
     }
   } catch (err) {
-    postMessage({ type: 'error', id: msg.id, message: err.message || String(err) });
+    postMessage({ type: 'error', id: msg.type === 'load' ? 'load' : msg.id, message: err.message || String(err) });
   }
 };
