@@ -7,9 +7,22 @@
 
 const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, findings: null }, window.TIMESHED || {});
 const $ = (id) => document.getElementById(id);
-const DARK = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-const STYLE = DARK ? 'https://tiles.openfreemap.org/styles/dark' : 'https://tiles.openfreemap.org/styles/positron';
-const OUTLINE = DARK ? '#181817' : '#fcfcfb';
+
+// ----------------------------------------------------------------- theme --
+// Light or dark follows the OS unless the visitor picks one with the button;
+// the choice sticks in localStorage. The basemap and the color ramps follow.
+let theme = (() => {
+  try { const t = localStorage.getItem('timeshed-theme'); if (t === 'light' || t === 'dark') return t; } catch (e) { /* private mode */ }
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+})();
+const isDark = () => theme === 'dark';
+const mapStyle = () => (isDark() ? 'https://tiles.openfreemap.org/styles/dark' : 'https://tiles.openfreemap.org/styles/positron');
+const outline = () => (isDark() ? '#181817' : '#f3f2ee');
+function applyThemeClass() {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.classList.toggle('system-dark', isDark());
+}
+applyThemeClass();
 
 // ---------------------------------------------------------------- shared --
 const BAND = 5;   // minutes per isochrone band
@@ -20,11 +33,11 @@ const LIGHT_ISO = ['#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78
                    '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6'];
 const DARK_ISO = ['#e3eefb', '#cde2fb', '#b7d3f6', '#9ec5f4', '#86b6ef', '#6da7ec',
                   '#5598e7', '#3987e5', '#2a78d6', '#256abf', '#1c5cab', '#184f95'];
-const ISO_RAMP = DARK ? DARK_ISO : LIGHT_ISO;
+const isoRamp = () => (isDark() ? DARK_ISO : LIGHT_ISO);
 const LIGHT_BLUES = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
 const LIGHT_ORANGES = ['#fbe4d8', '#f7bda2', '#f29568', '#eb6834', '#c04e21', '#8c3815'];
-const BLUES = DARK ? [...LIGHT_BLUES].reverse() : LIGHT_BLUES;
-const ORANGES = DARK ? [...LIGHT_ORANGES].reverse() : LIGHT_ORANGES;
+const blues = () => (isDark() ? [...LIGHT_BLUES].reverse() : LIGHT_BLUES);
+const oranges = () => (isDark() ? [...LIGHT_ORANGES].reverse() : LIGHT_ORANGES);
 
 const state = {
   mode: null, map: null, firstSymbol: undefined,
@@ -147,11 +160,28 @@ function pickDate(kind, first, last) {
 function prettyDate(iso) {
   return new Date(iso + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
-function isoColor(from) { return ISO_RAMP[Math.min(ISO_RAMP.length - 1, Math.floor(from / BAND))]; }
+function isoColor(from) { const r = isoRamp(); return r[Math.min(r.length - 1, Math.floor(from / BAND))]; }
 function buildIsoLegend() {
   const bar = [];
   for (let m = 0; m < MAX; m += BAND) bar.push(`<span style="background:${isoColor(m)}" title="${m}–${m + BAND} min"></span>`);
   $('iso-legend').innerHTML = `<div class="bar">${bar.join('')}</div><div class="ticks-row"><span>here</span><span>travel time</span><span>60 min</span></div>`;
+}
+let lastIso = { type: 'FeatureCollection', features: [] };
+function ensureExploreLayers() {
+  const map = state.map, ramp = isoRamp();
+  if (!map.getSource('iso')) map.addSource('iso', { type: 'geojson', data: lastIso });
+  const colorExpr = ['step', ['get', 'from'], ramp[0]];
+  for (let i = 1; i < ramp.length; i++) colorExpr.push(i * BAND, ramp[i]);
+  if (!map.getLayer('iso-fill')) {
+    map.addLayer({ id: 'iso-fill', type: 'fill', source: 'iso',
+      paint: { 'fill-color': colorExpr, 'fill-opacity': 0.58, 'fill-opacity-transition': { duration: 220 } } }, state.firstSymbol);
+    map.addLayer({ id: 'iso-line', type: 'line', source: 'iso', paint: { 'line-color': outline(), 'line-width': 0.6, 'line-opacity': 0.7 } }, state.firstSymbol);
+  } else {
+    map.setPaintProperty('iso-fill', 'fill-color', colorExpr);
+    map.setPaintProperty('iso-line', 'line-color', outline());
+  }
+  applyCutoff();
+  buildIsoLegend();
 }
 function applyCutoff() {
   const m = parseInt(checked('cutoff'), 10);
@@ -173,16 +203,7 @@ async function exploreInit() {
   if (state.lat === null) { state.lon = info.center[0]; state.lat = info.center[1]; }
   $('time-out').textContent = timeLabel(+$('time').value);
   buildTicks();
-  buildIsoLegend();
-
-  map.addSource('iso', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  const colorExpr = ['step', ['get', 'from'], ISO_RAMP[0]];
-  for (let i = 1; i < ISO_RAMP.length; i++) colorExpr.push(i * BAND, ISO_RAMP[i]);
-  map.addLayer({ id: 'iso-fill', type: 'fill', source: 'iso',
-    paint: { 'fill-color': colorExpr, 'fill-opacity': 0.58, 'fill-opacity-transition': { duration: 220 } } }, state.firstSymbol);
-  map.addLayer({ id: 'iso-line', type: 'line', source: 'iso',
-    paint: { 'line-color': OUTLINE, 'line-width': 0.6, 'line-opacity': 0.7 } }, state.firstSymbol);
-  applyCutoff();
+  ensureExploreLayers();
 
   state.marker = new maplibregl.Marker({ draggable: true, color: '#d9452b' }).setLngLat([state.lon, state.lat]);
   state.marker.on('dragend', () => { const p = state.marker.getLngLat(); state.lon = p.lng; state.lat = p.lat; exploreQuery(); });
@@ -211,6 +232,7 @@ async function exploreQuery() {
   if (state.map.getLayer('iso-fill')) state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.35);
   try {
     const { fc, note } = await getBackend().isochrone(params);
+    lastIso = fc;
     state.map.getSource('iso').setData(fc);
     state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.58);
     const p = fc.properties || {};
@@ -242,9 +264,9 @@ const WINDOW_LABELS = { weekday_am: 'Weekday 7–9 am', weekday_midday: 'Weekday
 function currentView() {
   const w = WINDOWS.find((x) => x.key === state.window) || WINDOWS[0];
   if (state.share && w.ratio) {
-    return { key: w.ratio, breaks: [0.1, 0.25, 0.5, 0.75, 0.9], ramp: ORANGES, fmt: pctFmt, cap: w.ratioLabel };
+    return { key: w.ratio, breaks: [0.1, 0.25, 0.5, 0.75, 0.9], ramp: oranges(), fmt: pctFmt, cap: w.ratioLabel };
   }
-  return { key: 'jobs_' + w.key, breaks: JOB_BREAKS, ramp: BLUES, fmt: kFmt, cap: `Jobs reachable within 45 min, ${WINDOW_LABELS[w.key].toLowerCase()}` };
+  return { key: 'jobs_' + w.key, breaks: JOB_BREAKS, ramp: blues(), fmt: kFmt, cap: `Jobs reachable within 45 min, ${WINDOW_LABELS[w.key].toLowerCase()}` };
 }
 function stepExpr(v) {
   const e = ['step', ['coalesce', ['get', v.key], -1], 'rgba(0,0,0,0)', 0, v.ramp[0]];
@@ -292,11 +314,7 @@ async function findingsInit() {
     $('tiles').innerHTML = tiles.map(([b, t]) => `<div class="tile"><b>${b}</b><span>${t}</span></div>`).join('');
   }).catch(() => {});
 
-  map.addSource('blocks', { type: 'geojson', data: CFG.base + F.blocks, promoteId: 'id' });
-  map.addLayer({ id: 'blocks', type: 'fill', source: 'blocks',
-    paint: { 'fill-color': stepExpr(currentView()), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.74] } }, state.firstSymbol);
-  map.addLayer({ id: 'blocks-line', type: 'line', source: 'blocks',
-    paint: { 'line-color': OUTLINE, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0, 13, 0.5], 'line-opacity': 0.6 } }, state.firstSymbol);
+  ensureFindingsLayers();
 
   const tip = $('tip');
   map.on('mousemove', 'blocks', (e) => {
@@ -327,6 +345,19 @@ async function findingsInit() {
   findingsShow(true);
 }
 
+function ensureFindingsLayers() {
+  const map = state.map;
+  if (!map.getSource('blocks')) map.addSource('blocks', { type: 'geojson', data: CFG.base + CFG.findings.blocks, promoteId: 'id' });
+  if (!map.getLayer('blocks')) {
+    map.addLayer({ id: 'blocks', type: 'fill', source: 'blocks',
+      paint: { 'fill-color': stepExpr(currentView()), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.74] } }, state.firstSymbol);
+    map.addLayer({ id: 'blocks-line', type: 'line', source: 'blocks',
+      paint: { 'line-color': outline(), 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0, 13, 0.5], 'line-opacity': 0.6 } }, state.firstSymbol);
+  } else {
+    map.setPaintProperty('blocks-line', 'line-color', outline());
+  }
+}
+
 function findingsShow(on) {
   setVisible('blocks', on); setVisible('blocks-line', on);
   if (!on) $('tip').style.display = 'none';
@@ -353,9 +384,24 @@ async function setMode(mode) {
 function init() {
   const h = hashParams();
   const startMode = h.get('mode') || CFG.mode;
-  const map = new maplibregl.Map({ container: 'map', style: STYLE, center: [-87.95, 43.03], zoom: 10.6, attributionControl: { compact: true } });
+  const map = new maplibregl.Map({ container: 'map', style: mapStyle(), center: [-87.95, 43.03], zoom: 10.6, attributionControl: { compact: true } });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   state.map = map;
+  $('theme').addEventListener('click', () => {
+    theme = isDark() ? 'light' : 'dark';
+    try { localStorage.setItem('timeshed-theme', theme); } catch (e) { /* ignore */ }
+    applyThemeClass();
+    // diff: false forces a full reload, so style.load fires and our layers
+    // are rebuilt; a diff between the two basemaps would silently drop them.
+    map.setStyle(mapStyle(), { diff: false });
+    map.once('style.load', () => {
+      state.firstSymbol = firstSymbolLayer(map);
+      if (state.exploreReady) ensureExploreLayers();
+      if (state.findingsLoaded) { ensureFindingsLayers(); findingsRender(); }
+      exploreShow(state.mode === 'explore' && state.exploreReady);
+      findingsShow(state.mode === 'findings' && state.findingsLoaded);
+    });
+  });
   if (CFG.findings) {
     $('tabs').hidden = false;
     for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => setMode(b.dataset.mode));
