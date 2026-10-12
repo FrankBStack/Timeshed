@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Where can Milwaukee get to work? · Timeshed</title>
   <link rel="icon" href="data:,">
   <meta property="og:type" content="website">
@@ -13,64 +13,100 @@
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
   <link rel="stylesheet" href="../style.css">
 </head>
 <body>
   <div id="map"></div>
-  <div class="tip" id="tip"></div>
-  <aside id="panel">
-    <header class="top">
-      <div>
-        <h1>Timeshed</h1>
-        <p id="feed" class="muted">loading…</p>
-      </div>
-      <a class="gh" href="https://github.com/FrankBStack/Timeshed" title="Source on GitHub">GitHub</a>
-    </header>
+
+  <header id="bar">
+    <a class="brand" href="./">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".3"/>
+        <circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".65"/>
+        <circle cx="12" cy="12" r="2.4" fill="currentColor"/>
+      </svg>
+      <span>Timeshed</span>
+    </a>
     <nav class="tabs" id="tabs" role="tablist" hidden>
       <button role="tab" data-mode="explore">Explore</button>
       <button role="tab" data-mode="findings">Findings</button>
     </nav>
+    <a class="gh" href="https://github.com/FrankBStack/Timeshed" title="Source on GitHub">GitHub</a>
+    <div id="progress" class="progress" hidden><span></span></div>
+  </header>
 
+  <div class="tip" id="tip"></div>
+
+  <aside id="panel">
     <section id="explore" role="tabpanel">
-      <p class="hint">Drop a pin anywhere. Everything you can reach on foot plus transit, door to door, redraws as you drag.</p>
-      <div class="row">
-        <label>Date <input type="date" id="date"></label>
-        <label>Leave at <input type="time" id="time" value="08:00" step="300"></label>
+      <h1>Everything you can reach</h1>
+      <p class="lede">Drop a pin anywhere. Walking plus transit, door to door, on the schedule in effect.</p>
+
+      <div class="field">
+        <div class="field-head"><span class="label">Leaving at</span><output id="time-out" class="value">8:00 am</output></div>
+        <input type="range" id="time" class="scrub" min="240" max="1560" step="10" value="480" aria-label="Departure time">
+        <div class="ticks" id="time-ticks"></div>
       </div>
-      <label class="slider">Within <output id="cutoff-out">30</output> min
-        <input type="range" id="cutoff" min="5" max="60" step="5" value="30">
-      </label>
+
+      <div class="field two">
+        <div>
+          <span class="label">Day</span>
+          <div class="seg" id="day">
+            <label><input type="radio" name="day" value="weekday" checked><span>Weekday</span></label>
+            <label><input type="radio" name="day" value="saturday"><span>Sat</span></label>
+            <label><input type="radio" name="day" value="sunday"><span>Sun</span></label>
+          </div>
+        </div>
+        <div>
+          <span class="label">Within</span>
+          <div class="seg" id="cutoff">
+            <label><input type="radio" name="cutoff" value="15"><span>15</span></label>
+            <label><input type="radio" name="cutoff" value="30" checked><span>30</span></label>
+            <label><input type="radio" name="cutoff" value="45"><span>45</span></label>
+            <label><input type="radio" name="cutoff" value="60"><span>60</span></label>
+          </div>
+        </div>
+      </div>
+
       <div class="legend" id="iso-legend"></div>
-      <p id="stats" class="muted"></p>
+      <p id="stats" class="meta"></p>
       <p id="error" class="error" hidden></p>
       <details>
-        <summary>About</summary>
-        <p>Walking network from OpenStreetMap, schedules from the agency's GTFS feed, routed with an
-        own RAPTOR implementation in Rust. Bands are 5 minutes wide; the slider only filters what was
-        already computed, so it is instant. Changing the time or date re-routes.</p>
-        <p id="engine-note" class="muted"></p>
+        <summary>How it works</summary>
+        <p>Walking network from OpenStreetMap, schedules from the agency's GTFS feed, routed with an own
+        RAPTOR implementation in Rust. Bands are 5 minutes wide; the cutoff only filters what was already
+        computed. Moving the time re-routes.</p>
+        <p id="engine-note"></p>
+        <p id="date-note"></p>
       </details>
     </section>
 
     <section id="findings" role="tabpanel" hidden>
-      <p class="hint">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
-      <fieldset>
-        <legend>Leaving</legend>
-        <div class="opts" id="scenarios"></div>
-      </fieldset>
+      <h1>Where can Milwaukee get to work?</h1>
+      <p class="lede">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
+      <div class="field">
+        <span class="label">Leaving</span>
+        <div class="seg wrap" id="windows"></div>
+      </div>
+      <label class="switch" id="share-wrap">
+        <input type="checkbox" id="share"><span class="knob"></span><span>As a share of the 7–9 am value</span>
+      </label>
       <div class="legend" id="f-legend"></div>
       <div class="tiles" id="tiles"></div>
       <details>
         <summary>How this was made</summary>
         <p>Each block's value is the mean over departures every 10 minutes across the two-hour window, from the
-        same engine as the Explore tab. Jobs are 2023 LODES workplace counts by block; blocks are 2020 TIGER.
-        The "share of morning" views divide the later value by the morning one.</p>
+        same engine as the Explore tab. Jobs are 2023 LODES workplace counts by block; blocks are 2020 TIGER.</p>
         <p>Hover a block for its numbers. The write-up with figures is in the
         <a href="https://github.com/FrankBStack/Timeshed#readme">README</a>.</p>
       </details>
     </section>
   </aside>
+
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script>window.TIMESHED = {"base": "../", "mode": "findings", "bundleUrl": "bundle.bin.gz", "findings": {"blocks": "data/blocks.geojson", "summary": "data/summary.json"}};</script>
   <script src="../app.js"></script>
