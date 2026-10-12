@@ -9,7 +9,8 @@ walking plus public transit redraws as you drag. The routing is an own implement
 [RAPTOR](https://www.microsoft.com/en-us/research/wp-content/uploads/2012/01/raptor_alenex.pdf)
 over the agency's published GTFS schedule, joined to a walking graph built from
 OpenStreetMap, so a query covers walking to the stop, riding, transferring and walking
-to the door. Because the schedule is real, 8 am and 11 pm give different shapes.
+to the door. It routes on the timetable itself rather than on average frequencies,
+so leaving at 8 am and leaving at 11 pm give different shapes.
 
 ![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday](docs/figures/live_map.png)
 
