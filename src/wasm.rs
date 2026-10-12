@@ -33,6 +33,7 @@ impl WebEngine {
     pub fn info(&self) -> String {
         let e = self.engine;
         let b = e.tt.bbox();
+        let c = e.tt.centroid();
         let (first, last) = e.tt.services.date_range().unwrap_or((NaiveDate::MIN, NaiveDate::MIN));
         json!({
             "name": e.name,
@@ -40,7 +41,7 @@ impl WebEngine {
             "routes": e.tt.route_info.len(),
             "walk_nodes": e.walk.node_count(),
             "bbox": [b.min_lon, b.min_lat, b.max_lon, b.max_lat],
-            "center": [b.mid_lon(), b.mid_lat()],
+            "center": [c.1, c.0],
             "first_date": first.to_string(),
             "last_date": last.to_string(),
         })

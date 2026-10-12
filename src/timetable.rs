@@ -253,6 +253,15 @@ impl Timetable {
         }
     }
 
+    /// Mean stop position: a better "middle of the system" than the bbox
+    /// centre, which can land in a river valley or a lake.
+    pub fn centroid(&self) -> (f64, f64) {
+        let n = self.stops.len().max(1) as f64;
+        let lat = self.stops.iter().map(|s| s.lat).sum::<f64>() / n;
+        let lon = self.stops.iter().map(|s| s.lon).sum::<f64>() / n;
+        (lat, lon)
+    }
+
     pub fn bbox(&self) -> crate::geo::BBox {
         let mut b = crate::geo::BBox::empty();
         for s in &self.stops {

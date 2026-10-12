@@ -54,6 +54,7 @@ pub async fn serve(engine: Engine, web_dir: PathBuf, addr: SocketAddr) -> Result
 async fn info(State(app): State<App>) -> Json<serde_json::Value> {
     let e = app.engine;
     let b = e.tt.bbox();
+    let c = e.tt.centroid();
     let (first, last) = e.tt.services.date_range().unwrap_or((NaiveDate::MIN, NaiveDate::MIN));
     Json(json!({
         "name": e.name,
@@ -61,7 +62,7 @@ async fn info(State(app): State<App>) -> Json<serde_json::Value> {
         "routes": e.tt.route_info.len(),
         "walk_nodes": e.walk.node_count(),
         "bbox": [b.min_lon, b.min_lat, b.max_lon, b.max_lat],
-        "center": [b.mid_lon(), b.mid_lat()],
+        "center": [c.1, c.0],
         "first_date": first.to_string(),
         "last_date": last.to_string(),
     }))
