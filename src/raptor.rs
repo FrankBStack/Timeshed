@@ -36,6 +36,12 @@ pub struct Raptor {
     /// number of transit legs in the journey behind `best`
     legs: Vec<u8>,
     parent: Vec<Parent>,
+    /// the round in which `best` was set
+    best_round: Vec<u8>,
+    /// per round: the parent assigned to a stop in that round, if it improved
+    round_parents: Vec<Vec<Option<Parent>>>,
+    /// per round: each touched stop's label at the end of that round
+    round_labels: Vec<Vec<u32>>,
     marked: Vec<bool>,
     marked_list: Vec<u32>,
     touched: Vec<u32>,
@@ -52,6 +58,9 @@ impl Raptor {
             prev: vec![UNREACHED; tt.stops.len()],
             legs: vec![0; tt.stops.len()],
             parent: vec![Parent::Source; tt.stops.len()],
+            best_round: vec![0; tt.stops.len()],
+            round_parents: Vec::new(),
+            round_labels: Vec::new(),
             marked: vec![false; tt.stops.len()],
             marked_list: Vec::new(),
             touched: Vec::new(),
@@ -63,7 +72,7 @@ impl Raptor {
 
     /// Relax footpaths from every currently marked stop, and from any stop
     /// that improves as a result, until nothing changes.
-    fn relax_footpaths(&mut self, tt: &Timetable, walk_pace: f64, limit: u32) {
+    fn relax_footpaths(&mut self, tt: &Timetable, walk_pace: f64, limit: u32, round: usize) {
         self.footpath_queue.clear();
         self.footpath_queue.extend_from_slice(&self.marked_list);
         while let Some(s) = self.footpath_queue.pop() {
@@ -72,7 +81,7 @@ impl Raptor {
             for &(to, meters) in &tt.transfers[s as usize] {
                 let t = from + (meters as f64 * walk_pace).round() as u32;
                 if t <= limit && t < self.best[to as usize] {
-                    self.improve(to, t, legs, Parent::Walk { from_stop: s });
+                    self.improve(to, t, legs, Parent::Walk { from_stop: s }, round);
                     self.footpath_queue.push(to);
                 }
             }
@@ -85,14 +94,33 @@ impl Raptor {
             self.prev[s as usize] = UNREACHED;
             self.legs[s as usize] = 0;
             self.parent[s as usize] = Parent::Source;
+            self.best_round[s as usize] = 0;
             self.marked[s as usize] = false;
+            for r in 0..self.round_parents.len() {
+                self.round_parents[r][s as usize] = None;
+                self.round_labels[r][s as usize] = UNREACHED;
+            }
         }
         self.touched.clear();
         self.marked_list.clear();
     }
 
+    fn ensure_round(&mut self, round: usize, stops: usize) {
+        while self.round_parents.len() <= round {
+            self.round_parents.push(vec![None; stops]);
+            self.round_labels.push(vec![UNREACHED; stops]);
+        }
+    }
+
+    /// Freeze every touched stop's label as "the label at the end of `round`".
+    fn close_round(&mut self, round: usize) {
+        for &s in &self.touched {
+            self.round_labels[round][s as usize] = self.best[s as usize];
+        }
+    }
+
     #[inline]
-    fn improve(&mut self, stop: u32, time: u32, legs: u8, parent: Parent) {
+    fn improve(&mut self, stop: u32, time: u32, legs: u8, parent: Parent, round: usize) {
         let s = stop as usize;
         if self.best[s] == UNREACHED {
             self.touched.push(stop);
@@ -100,6 +128,8 @@ impl Raptor {
         self.best[s] = time;
         self.legs[s] = legs;
         self.parent[s] = parent;
+        self.best_round[s] = round as u8;
+        self.round_parents[round][s] = Some(parent);
         if !self.marked[s] {
             self.marked[s] = true;
             self.marked_list.push(stop);
@@ -122,12 +152,14 @@ impl Raptor {
         limit: u32,
     ) {
         self.reset();
+        self.ensure_round(max_rounds, tt.stops.len());
         for (s, t) in sources {
             if t <= limit && t < self.best[s as usize] {
-                self.improve(s, t, 0, Parent::Source);
+                self.improve(s, t, 0, Parent::Source, 0);
             }
         }
-        self.relax_footpaths(tt, walk_pace, limit);
+        self.relax_footpaths(tt, walk_pace, limit, 0);
+        self.close_round(0);
 
         for round in 1..=max_rounds {
             // Labels from the previous round are what we can board with.
@@ -164,7 +196,7 @@ impl Raptor {
                     if let Some(t) = trip {
                         let ev = route.event(t, i);
                         if ev.alight && ev.arr < self.best[s as usize] && ev.arr <= limit {
-                            self.improve(s, ev.arr, round as u8, Parent::Trip { route: r, trip: t as u32, from_stop: boarded_at });
+                            self.improve(s, ev.arr, round as u8, Parent::Trip { route: r, trip: t as u32, from_stop: boarded_at }, round);
                         }
                     }
                     // Could we have boarded an earlier trip at this stop?
@@ -200,7 +232,8 @@ impl Raptor {
             }
 
             // Footpaths from stops improved this round.
-            self.relax_footpaths(tt, walk_pace, limit);
+            self.relax_footpaths(tt, walk_pace, limit, round);
+            self.close_round(round);
 
             if self.marked_list.is_empty() {
                 break;
@@ -230,18 +263,45 @@ impl Raptor {
 
     /// The journey behind a stop's label, from its source to the stop: each
     /// entry is a stop and how it was reached. Empty if the stop is unreached.
+    ///
+    /// Follows the round-indexed parents rather than the final ones: a trip
+    /// boarded in round k used the boarding stop's label as of round k-1, and
+    /// that label's parent may since have been overwritten by a later, earlier
+    /// arrival that reaches the same bus by a sillier path. Using the labels
+    /// as they stood when the boarding happened gives a consistent journey,
+    /// and the fewest rides for the arrival time.
     pub fn journey(&self, stop: u32) -> Vec<(u32, Parent)> {
         let mut chain = Vec::new();
-        let mut s = stop;
-        if self.arrival(s).is_none() {
+        if self.arrival(stop).is_none() {
             return chain;
         }
+        let mut s = stop;
+        let mut k = self.best_round[stop as usize] as usize;
         for _ in 0..64 {
-            let p = self.parent(s);
+            // the parent recorded for s in round k, or the latest round before it
+            let mut kk = k;
+            let p = loop {
+                if let Some(p) = self.round_parents[kk][s as usize] {
+                    break p;
+                }
+                if kk == 0 {
+                    break Parent::Source;
+                }
+                kk -= 1;
+            };
             chain.push((s, p));
             match p {
                 Parent::Source => break,
-                Parent::Trip { from_stop, .. } | Parent::Walk { from_stop } => s = from_stop,
+                // boarding looked at labels as of the previous round
+                Parent::Trip { from_stop, .. } => {
+                    s = from_stop;
+                    k = kk.saturating_sub(1);
+                }
+                // footpaths are relaxed within the round from stops improved in it
+                Parent::Walk { from_stop } => {
+                    s = from_stop;
+                    k = kk;
+                }
             }
         }
         chain.reverse();
@@ -344,6 +404,45 @@ mod tests {
         assert_eq!(j.iter().map(|x| x.0).collect::<Vec<_>>(), vec![0, 1, 4]);
         assert_eq!(j[0].1, Parent::Source);
         assert_eq!(r.journey(3).len(), 3, "0 -> 2 by A, 2 -> 3 by B");
+    }
+
+    #[test]
+    fn journey_uses_labels_as_of_the_boarding_round() {
+        // Sources: stop 0 at t=0, stop 3 at t=100 (both walked to from the origin).
+        // Route X: 3 -> 2, departs 120, arrives 400. Route Y: 0 -> 1, departs 0,
+        // arrives 50; footpath 1 -> 3 takes 10 s, so stop 3 improves to 60 in
+        // round 1 and its final parent becomes that walk. The ride on X boarded
+        // with stop 3's round-0 label (100), so the journey must be the direct
+        // one: source at 3, ride X. Not 0 -> Y -> walk -> X.
+        let stops = (0..4).map(|i| StopInfo { gtfs_id: i.to_string(), name: String::new(), lat: 0.0, lon: 0.0 }).collect();
+        let x = Route { info: 0, stops: vec![3, 2], trips: vec![TripRef { gtfs_trip: 0, service: 0 }], events: vec![ev(120, 120), ev(400, 400)] };
+        let y = Route { info: 0, stops: vec![0, 1], trips: vec![TripRef { gtfs_trip: 1, service: 0 }], events: vec![ev(0, 0), ev(50, 50)] };
+        let routes = vec![x, y];
+        let mut stop_routes = vec![Vec::new(); 4];
+        for (r, route) in routes.iter().enumerate() {
+            for (p, &s) in route.stops.iter().enumerate() {
+                stop_routes[s as usize].push((r as u32, p as u32));
+            }
+        }
+        let mut transfers: Vec<Vec<(u32, f32)>> = vec![Vec::new(); 4];
+        transfers[1].push((3, 10.0));
+        let tt = Timetable {
+            stops,
+            route_info: vec![RouteInfo { gtfs_id: "R".into(), short_name: "R".into(), long_name: String::new(), route_type: 3, color: None }],
+            routes,
+            stop_routes,
+            transfers,
+            services: ServiceCalendar { ids: vec!["wk".into()], ..Default::default() },
+            trip_ids: vec![],
+        };
+        let mut r = Raptor::new(&tt);
+        r.run(&tt, &[true], [(0, 0), (3, 100)], 5, 1.0, 0, u32::MAX);
+        assert_eq!(r.arrival(2), Some(400));
+        assert_eq!(r.arrival(3), Some(60), "stop 3 improved by the footpath after the boarding");
+        assert_eq!(r.parent(3), Parent::Walk { from_stop: 1 });
+        let j = r.journey(2);
+        assert_eq!(j.iter().map(|x| x.0).collect::<Vec<_>>(), vec![3, 2], "{j:?}");
+        assert_eq!(j[0].1, Parent::Source);
     }
 
     #[test]
