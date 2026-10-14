@@ -1,0 +1,73 @@
+{
+  "budget_min": 45,
+  "county_jobs": 534847,
+  "jobs_in_bbox": 726716,
+  "blocks": 7355,
+  "population": 830399,
+  "scenarios": {
+    "weekday_am": {
+      "label": "Weekday 7\u20139 am",
+      "mean": 53431.23090024595,
+      "median": 26156.5,
+      "share_reaching_100k": 0.19689330069039102,
+      "share_reaching_25k": 0.5099885717588774,
+      "share_under_5k": 0.1883275389300806,
+      "p10": 2464.100000000002,
+      "p90": 187821.31666666668
+    },
+    "weekday_midday": {
+      "label": "Weekday noon\u20132 pm",
+      "mean": 44813.90936335023,
+      "median": 21505.166666666668,
+      "share_reaching_100k": 0.16071069449746447,
+      "share_reaching_25k": 0.4527835414059988,
+      "share_under_5k": 0.2096269383754075,
+      "p10": 2043.0,
+      "p90": 175117.23333333334
+    },
+    "weekday_night": {
+      "label": "Weekday 10 pm\u2013midnight",
+      "mean": 40440.09126155017,
+      "median": 16188.583333333334,
+      "share_reaching_100k": 0.14988939052190572,
+      "share_reaching_25k": 0.40594942912985205,
+      "share_under_5k": 0.22669102443524136,
+      "p10": 1586.5500000000002,
+      "p90": 168485.45
+    },
+    "weekday_owl": {
+      "label": "Weekday midnight\u20132 am",
+      "mean": 29844.099236632028,
+      "median": 11555.5,
+      "share_reaching_100k": 0.09926312531686575,
+      "share_reaching_25k": 0.30063499594773113,
+      "share_under_5k": 0.26741482106794445,
+      "p10": 1515.8000000000006,
+      "p90": 140330.45
+    },
+    "sunday_am": {
+      "label": "Sunday 7\u20139 am",
+      "mean": 44023.28530130295,
+      "median": 20081.916666666668,
+      "share_reaching_100k": 0.16287712292524437,
+      "share_reaching_25k": 0.44186108123925966,
+      "share_under_5k": 0.20672231060008503,
+      "p10": 2022.0000000000005,
+      "p90": 173940.05000000002
+    }
+  },
+  "night_vs_am": {
+    "median_ratio": 0.8223417007652584,
+    "share_losing_half": 0.13002062863755856,
+    "share_losing_three_quarters": 0.031098303345741023,
+    "share_under_5k": 0.22669102443524136,
+    "mean_ratio_of_means": 0.7568624300842005
+  },
+  "owl_vs_am": {
+    "median_ratio": 0.6049383995543521,
+    "share_losing_half": 0.37583980712886217,
+    "share_losing_three_quarters": 0.0922893693272752,
+    "share_under_5k": 0.26741482106794445,
+    "mean_ratio_of_means": 0.5585515948968087
+  }
+}

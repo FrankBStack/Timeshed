@@ -56,18 +56,26 @@ def load_runs(runs_dir: Path) -> pd.DataFrame:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", type=Path, default=Path("data/analysis/runs"))
-    ap.add_argument("--blocks", type=Path, default=Path("data/analysis/blocks.parquet"))
-    ap.add_argument("--out", type=Path, default=Path("data/analysis"))
+    ap.add_argument("--city", default=None, help="city key: reads data/analysis/<city>/, writes docs/data/<city>/ and docs/figures/<city>/")
+    ap.add_argument("--county", default="079", help="3-digit county FIPS of the origin blocks")
+    ap.add_argument("--runs", type=Path, default=None)
+    ap.add_argument("--blocks", type=Path, default=None)
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--docs", type=Path, default=Path("docs"))
     ap.add_argument("--budget", type=int, default=45)
     args = ap.parse_args()
+    base = Path("data/analysis") / args.city if args.city else Path("data/analysis")
+    args.runs = args.runs or base / "runs"
+    args.blocks = args.blocks or base / "blocks.parquet"
+    args.out = args.out or base
+    data_dir = args.docs / "data" / args.city if args.city else args.docs / "data"
+    figs = args.docs / "figures" / args.city if args.city else args.docs / "figures"
 
     print("loading runs...")
     runs = load_runs(args.runs)
     scenarios = [k for k in SCENARIOS if k in set(runs["scenario"])]
     blocks = gpd.read_parquet(args.blocks)
-    county_jobs = int(blocks.loc[blocks["COUNTYFP20"] == "079", "jobs"].sum())
+    county_jobs = int(blocks.loc[blocks["COUNTYFP20"] == args.county, "jobs"].sum())
     all_jobs = int(blocks["jobs"].sum())
 
     # per block x scenario: mean over departures (and the spread, for the map)
@@ -114,19 +122,18 @@ def main():
     cols = ["GEOID20", "POP20", "workers", "jobs"] + [c for c in data.columns if c.startswith("jobs_") or c.startswith("low_wage_") or c.endswith("_over_am")]
     data[cols].to_csv(args.out / "access_by_block.csv", index=False)
     (args.out / "summary.json").write_text(json.dumps(stats, indent=2))
-    (args.docs / "data").mkdir(parents=True, exist_ok=True)
-    (args.docs / "data" / "summary.json").write_text(json.dumps(stats, indent=2))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "summary.json").write_text(json.dumps(stats, indent=2))
     print(json.dumps(stats, indent=2))
 
     # ---- figures -------------------------------------------------------
-    figs = args.docs / "figures"
     figs.mkdir(parents=True, exist_ok=True)
     plt.rcParams.update({"font.family": "sans-serif", "font.size": 10, "axes.edgecolor": GRID,
                          "axes.labelcolor": INK_MUTED, "xtick.color": INK_MUTED, "ytick.color": INK_MUTED,
                          "text.color": INK, "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb"})
 
     # 1. side-by-side choropleths, same scale
-    proj = data.to_crs(epsg=32016)  # Wisconsin South state plane, meters-ish
+    proj = data.to_crs(data.estimate_utm_crs())
     vmax = float(np.percentile(data[f"jobs_{scenarios[0]}"], 99))
     show = [k for k in ["weekday_am", "weekday_night", "weekday_owl"] if k in scenarios] or scenarios[:2]
     fig, axes = plt.subplots(1, len(show), figsize=(4.6 * len(show), 7.0))
@@ -170,10 +177,10 @@ def main():
         web[f"jobs_{k}"] = web[f"jobs_{k}"].round().astype(int)
     for c in ratios:
         web[c] = web[c].round(3)
-    web["geometry"] = web.to_crs(epsg=32016).simplify(8, preserve_topology=True).to_crs(epsg=4326)
+    utm = web.estimate_utm_crs()
+    web["geometry"] = web.to_crs(utm).simplify(8, preserve_topology=True).to_crs(epsg=4326)
     web = web.set_geometry("geometry").set_crs(epsg=4326)
-    (args.docs / "data").mkdir(parents=True, exist_ok=True)
-    out = args.docs / "data" / "blocks.geojson"
+    out = data_dir / "blocks.geojson"
     web.to_file(out, driver="GeoJSON", COORDINATE_PRECISION=5)
     print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB), figures in {figs}")
 
