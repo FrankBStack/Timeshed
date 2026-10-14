@@ -9,6 +9,11 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Bundle file header: magic bytes, then a little-endian format version.
+/// Bump the version whenever a serialized struct changes shape.
+pub const BUNDLE_MAGIC: &[u8; 4] = b"TSHD";
+pub const BUNDLE_VERSION: u32 = 1;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BuildOpts {
     /// how far a stop may be from the nearest walkable node
@@ -93,22 +98,39 @@ impl Engine {
     #[cfg(feature = "native")]
     pub fn save(&self, path: &std::path::Path) -> Result<()> {
         use anyhow::Context;
-        let f = std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
-        bincode::serialize_into(std::io::BufWriter::new(f), self)?;
-        Ok(())
+        std::fs::write(path, self.to_bytes()?).with_context(|| format!("writing {}", path.display()))
     }
 
     #[cfg(feature = "native")]
     pub fn load(path: &std::path::Path) -> Result<Engine> {
         use anyhow::Context;
-        let f = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let e: Engine = bincode::deserialize_from(std::io::BufReader::new(f))?;
-        Ok(e.finish_load())
+        let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+        Engine::from_bytes(&bytes)
+    }
+
+    /// The bundle is a short header (magic, format version) followed by the
+    /// bincode payload, so a mismatch is reported in words rather than as a
+    /// failed deserialization.
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut out = Vec::with_capacity(BUNDLE_MAGIC.len() + 4);
+        out.extend_from_slice(BUNDLE_MAGIC);
+        out.extend_from_slice(&BUNDLE_VERSION.to_le_bytes());
+        bincode::serialize_into(&mut out, self)?;
+        Ok(out)
     }
 
     /// Deserialize a bundle held in memory (the browser build's only way in).
     pub fn from_bytes(bytes: &[u8]) -> Result<Engine> {
-        let e: Engine = bincode::deserialize(bytes)?;
+        if bytes.len() < 8 || &bytes[..4] != BUNDLE_MAGIC {
+            anyhow::bail!("not a Timeshed bundle (missing header); rebuild it with `timeshed build`");
+        }
+        let version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        if version != BUNDLE_VERSION {
+            anyhow::bail!(
+                "bundle is format version {version}, this build reads version {BUNDLE_VERSION}; rebuild it with `timeshed build`"
+            );
+        }
+        let e: Engine = bincode::deserialize(&bytes[8..])?;
         Ok(e.finish_load())
     }
 
@@ -273,3 +295,34 @@ impl<'a> Query<'a> {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geo::BBox;
+
+    fn tiny_engine() -> Engine {
+        let walk = WalkGraph { lat: vec![43.0], lon: vec![-87.9], offsets: vec![0, 0], targets: vec![], lengths: vec![], bbox: BBox::empty() };
+        Engine::build("tiny".into(), Timetable::default(), walk, BuildOpts::default())
+    }
+
+    #[test]
+    fn bundle_round_trips_with_a_header() {
+        let bytes = tiny_engine().to_bytes().unwrap();
+        assert_eq!(&bytes[..4], BUNDLE_MAGIC);
+        let back = Engine::from_bytes(&bytes).unwrap();
+        assert_eq!(back.name, "tiny");
+        assert_eq!(back.walk.node_count(), 1);
+    }
+
+    #[test]
+    fn wrong_magic_and_version_are_reported_in_words() {
+        let mut bytes = tiny_engine().to_bytes().unwrap();
+        bytes[4] = 99;
+        let err = Engine::from_bytes(&bytes).err().expect("should fail").to_string();
+        assert!(err.contains("format version 99") && err.contains("timeshed build"), "{err}");
+        bytes[0] = b'X';
+        let err = Engine::from_bytes(&bytes).err().expect("should fail").to_string();
+        assert!(err.contains("not a Timeshed bundle"), "{err}");
+    }
+}
