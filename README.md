@@ -38,15 +38,17 @@ within 45 minutes door to door, leaving every 10 minutes across a two-hour windo
 averaging. Jobs are 2023 LODES workplace counts by block (547,164 jobs in the study
 area, 496,457 of them in the county).
 
-| Leaving | Median resident can reach | Mean | Residents reaching 100k+ | Residents under 5k |
+Jobs reachable within 45 minutes, for the median resident and on average, and the
+share of residents who can reach at least 100,000 jobs or fewer than 5,000. All
+figures are population weighted.
+
+| Leaving | Median | Mean | ≥ 100k | < 5k |
 |---|---:|---:|---:|---:|
-| Weekday 7–9 am | **104,226** jobs | 112,169 | 51% | 5.0% |
+| Weekday 7–9 am | **104,226** | 112,169 | 51% | 5.0% |
 | Weekday noon–2 pm | 87,064 | 96,218 | 44% | 5.1% |
 | Weekday 10 pm–midnight | **78,129** | 88,938 | 41% | 6.5% |
 | Weekday midnight–2 am | **33,932** | 48,648 | 15% | 7.0% |
 | Sunday 7–9 am | 92,406 | 101,587 | 48% | 5.2% |
-
-All figures are population weighted.
 
 - Between 10 pm and midnight the median block still has **79%** of its morning job
   access. Only 4% of residents lose more than half. Sunday morning is nearly a weekday.
@@ -68,7 +70,7 @@ under its 2020 levy it put several routes on 24-hour service, and the feed shows
 five windows for every inhabited block in Hamilton County (7,355 blocks, 830,399
 residents; 534,847 jobs in the county):
 
-| | Milwaukee | Cincinnati |
+| 45-minute budget | Milwaukee | Cincinnati |
 |---|---:|---:|
 | Median resident's reach, weekday 7–9 am | 104,226 jobs | 26,156 jobs |
 | Residents reaching 100,000+ in the morning | 51% | 20% |
@@ -135,18 +137,18 @@ after 1 am it cuts everyone to four lines.
 ## How it works
 
 ```
-GTFS zip ──> gtfs.rs ──> timetable.rs ──┐
-                                        ├──> engine.rs (snap stops, build footpaths) ──> bundle.bin
-OSM .pbf ──> osm.rs  ──> walk.rs ───────┘                                                  │
-                                                          ┌────────────────────────────────┘
-         query:  walk (Dijkstra) ──> raptor.rs ──> walk (multi-source Dijkstra)
-                                        │                 │
-                 reference.rs: brute force, checks raptor.rs on random feeds and the real one
-                                                          │
-         isochrone.rs: node labels ──> 100 m grid ──> marching squares ──> GeoJSON bands
-         access.rs:    node labels ──> destination blocks ──> weighted sums, in parallel
-         wasm.rs:      the same query + isochrone.rs behind wasm-bindgen, for the browser
-         server.rs:    the same behind axum, for `timeshed serve`
+GTFS zip ─ gtfs.rs ─ timetable.rs ─┐
+                                   ├─ engine.rs: snap stops, footpaths ─ bundle
+OSM .pbf ─ osm.rs ─ walk.rs ───────┘                                      │
+                                                                          ▼
+query:  walk from the pin ──► raptor.rs ──► walk from every reached stop
+                                                      │
+          isochrone.rs   node labels → 100 m grid → marching squares → bands
+          access.rs      node labels → destination blocks → weighted sums
+          wasm.rs        the same, behind wasm-bindgen, for the browser
+          server.rs      the same, behind axum, for `timeshed serve`
+
+reference.rs: brute force; checks raptor.rs on random feeds and the real one
 ```
 
 - **Timetable.** GTFS routes are regrouped into RAPTOR routes: trips that share an
@@ -202,7 +204,7 @@ budget. The two share no code; the only rule copied is R5's 60-second boarding s
 
 ![Timeshed against r5, 19,425 pairs](docs/figures/crosscheck_r5.png)
 
-| | |
+| Against r5 | |
 |---|---:|
 | Pairs reachable by both within two hours | 19,474 of 22,500 |
 | Reachable by only one router (nearly all over 80 minutes, at the edge of the budget) | 854 Timeshed, 2 r5 |
@@ -234,15 +236,17 @@ cargo run --release -- build --gtfs data/raw/gtfs/mcts.zip \
     --osm data/raw/osm/wisconsin-latest.osm.pbf \
     --name "Milwaukee County Transit" -o data/bundles/milwaukee.bin
 
-# one query
+# one query, with the journey to a point
 cargo run --release -- query --bundle data/bundles/milwaukee.bin \
-    --lat 43.0389 --lon -87.9100 --date 2026-10-08 --time 08:00 --max 45 --geojson iso.geojson
+    --lat 43.0389 --lon -87.9100 --date 2026-10-08 --time 08:00 \
+    --max 45 --to-lat 43.1226 --to-lon -87.9152
 
 # the live map on http://127.0.0.1:8080
 cargo run --release -- serve --bundle data/bundles/milwaukee.bin
 
-# the same map as static files that route in the browser (needs wasm-pack)
-scripts/build-web.sh data/bundles/milwaukee.bin && (cd docs && python3 -m http.server 8090)
+# the published site as static files (needs wasm-pack), then open :8090
+scripts/build-web.sh milwaukee=data/bundles/milwaukee.bin
+(cd docs && python3 -m http.server 8090)
 ```
 
 Reproducing the analysis, from the census downloads to the figures, is in
@@ -258,15 +262,21 @@ has been run.
 ## Layout
 
 ```
-src/gtfs.rs        GTFS reader                 src/engine.rs     bundle + door-to-door query
-src/timetable.rs   RAPTOR route grouping       src/isochrone.rs  grid + marching squares
-src/osm.rs         walking graph from PBF      src/access.rs     batch accessibility
-src/walk.rs        r-tree + bounded Dijkstra   src/server.rs     axum API
-src/raptor.rs      the algorithm               src/reference.rs  brute-force router for checking
-src/wasm.rs        browser bindings            web/              the map (MapLibre), worker
-scripts/           build-web.sh and render-pages.py assemble the site
-analysis/          census + LODES prep, summary, figures, r5 cross-check
-docs/              inputs to the published site: block data, figures, cache headers
+src/gtfs.rs       GTFS reader
+src/timetable.rs  RAPTOR route grouping
+src/osm.rs        walking graph from a PBF extract
+src/walk.rs       r-tree, edge snapping, bounded Dijkstra
+src/raptor.rs     the algorithm, with journey reconstruction
+src/reference.rs  brute-force router the tests check RAPTOR against
+src/engine.rs     bundle, door-to-door query, itineraries
+src/isochrone.rs  grid + marching squares
+src/access.rs     batch accessibility and pairwise matrices
+src/server.rs     axum API           src/wasm.rs   browser bindings
+web/              the map (MapLibre) and its worker
+scripts/          build-web.sh, render-pages.py, smoke.mjs
+analysis/         census + LODES prep, summary, figures, r5 cross-check
+cities.json       the cities: feed, extract, analysis county
+docs/             inputs to the site: block data, figures, cache headers
 ```
 
 ## License
