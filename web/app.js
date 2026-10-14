@@ -76,6 +76,12 @@ function httpBackend() {
       const fc = await res.json();
       return { fc, note: `${fc.properties.query_ms} ms on the server` };
     },
+    async itinerary(params, to) {
+      const res = await fetch('/api/itinerary?' + new URLSearchParams({ ...params, to_lat: to.lat, to_lon: to.lon }).toString());
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
   };
 }
 
@@ -105,11 +111,12 @@ function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
       } else if (m.type === 'error' && m.id === 'load') {
         bar.hidden = true;
         reject(new Error('The routing engine failed to load: ' + m.message));
-      } else if (m.type === 'isochrone' || m.type === 'error') {
+      } else if (m.type === 'isochrone' || m.type === 'itinerary' || m.type === 'error') {
         const w = waiting.get(m.id);
         waiting.delete(m.id);
         if (!w) return;
         if (m.type === 'error') w.reject(new Error(m.message));
+        else if (m.type === 'itinerary') w.resolve(JSON.parse(m.json));
         else w.resolve({ fc: JSON.parse(m.geojson), note: `${m.ms.toFixed(0)} ms in your browser` });
       }
     };
@@ -122,6 +129,16 @@ function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
       await ready;
       const id = nextId++;
       return new Promise((resolve, reject) => { waiting.set(id, { resolve, reject }); worker.postMessage({ type: 'isochrone', id, params }); });
+    },
+    // the worker reconstructs against its most recent isochrone run, which is
+    // always the one on screen because it answers messages in order
+    async itinerary(_params, to) {
+      await ready;
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        waiting.set(id, { resolve, reject: (e) => (/not reachable/.test(e.message) ? resolve(null) : reject(e)) });
+        worker.postMessage({ type: 'itinerary', id, to_lat: to.lat, to_lon: to.lon });
+      });
     },
   };
 }
@@ -174,6 +191,81 @@ function buildIsoLegend() {
   $('iso-legend').innerHTML = `<div class="bar">${bar.join('')}</div><div class="ticks-row"><span>here</span><span>travel time</span><span>60 min</span></div>`;
 }
 let lastIso = { type: 'FeatureCollection', features: [] };
+let lastTrip = { type: 'FeatureCollection', features: [] };
+function ensureTripLayers() {
+  const map = state.map;
+  if (!map.getSource('trip')) map.addSource('trip', { type: 'geojson', data: lastTrip });
+  if (!map.getLayer('trip-walk')) {
+    map.addLayer({ id: 'trip-casing', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'ride'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': outline(), 'line-width': 9, 'line-opacity': 0.9 } });
+    map.addLayer({ id: 'trip-ride', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'ride'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 5 } });
+    map.addLayer({ id: 'trip-walk', type: 'line', source: 'trip', filter: ['==', ['get', 'kind'], 'walk'],
+      layout: { 'line-cap': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 3.5, 'line-dasharray': [0.2, 1.6] } });
+    map.addLayer({ id: 'trip-end', type: 'circle', source: 'trip', filter: ['==', ['get', 'kind'], 'end'],
+      paint: { 'circle-radius': 7, 'circle-color': '#d9452b', 'circle-stroke-color': outline(), 'circle-stroke-width': 2.5 } });
+  } else {
+    map.setPaintProperty('trip-casing', 'line-color', outline());
+    map.setPaintProperty('trip-end', 'circle-stroke-color', outline());
+  }
+}
+function clearTrip() {
+  lastTrip = { type: 'FeatureCollection', features: [] };
+  if (state.map.getSource('trip')) state.map.getSource('trip').setData(lastTrip);
+  $('trip').hidden = true;
+  $('trip-hint').hidden = false;
+}
+function clock(secs) {
+  const h24 = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+  const h = h24 % 24, ap = h < 12 ? 'am' : 'pm', h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ap}${h24 >= 24 ? ' +1' : ''}`;
+}
+function showTrip(it, to) {
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink-2').trim() || '#5c5b55';
+  const feats = it.legs.map((leg) => ({
+    type: 'Feature',
+    properties: { kind: leg.kind, color: leg.kind === 'ride' ? (leg.color ? '#' + leg.color.replace('#', '') : getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()) : ink },
+    geometry: { type: 'LineString', coordinates: leg.path.length > 1 ? leg.path : [leg.path[0], leg.path[0]] },
+  }));
+  feats.push({ type: 'Feature', properties: { kind: 'end' }, geometry: { type: 'Point', coordinates: [to.lon, to.lat] } });
+  lastTrip = { type: 'FeatureCollection', features: feats };
+  state.map.getSource('trip').setData(lastTrip);
+  const mins = (s) => Math.max(1, Math.round(s / 60));
+  $('trip-title').textContent = `${mins(it.total_secs)} min door to door · arrive ${clock(it.arrive)}`;
+  const items = it.legs.map((leg) => {
+    if (leg.kind === 'walk') {
+      return `<li><span class="dot"></span><div>Walk <b>${mins(leg.secs)} min</b> <span class="when">· ${Math.round(leg.meters)} m</span></div></li>`;
+    }
+    const color = leg.color ? '#' + leg.color.replace('#', '') : 'var(--accent)';
+    return `<li><span class="dot ride" style="background:${color}"></span><div><b>${leg.route}</b> ${leg.long_name && leg.long_name !== leg.route ? '· ' + leg.long_name : ''}<br>
+      <span class="when">${clock(leg.depart)} from ${leg.from}<br>${clock(leg.arrive)} at ${leg.to} · ${leg.stops} stop${leg.stops === 1 ? '' : 's'}</span></div></li>`;
+  });
+  $('trip-legs').innerHTML = items.join('');
+  $('trip').hidden = false;
+  $('trip-hint').hidden = true;
+}
+async function tripTo(lngLat) {
+  if (!state.exploreReady || !state.info) return;
+  const info = state.info;
+  const date = pickDate(checked('day'), new Date(info.first_date), new Date(info.last_date));
+  const params = { lat: state.lat, lon: state.lon, date, time: timeParam(+$('time').value), max: MAX, band: BAND };
+  try {
+    const it = await getBackend().itinerary(params, { lat: lngLat.lat, lon: lngLat.lng });
+    if (!it) {
+      lastTrip = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { kind: 'end' }, geometry: { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] } }] };
+      state.map.getSource('trip').setData(lastTrip);
+      $('trip-title').textContent = `Not reachable within ${MAX} min from the pin`;
+      $('trip-legs').innerHTML = '';
+      $('trip').hidden = false;
+      $('trip-hint').hidden = true;
+      return;
+    }
+    showTrip(it, { lat: lngLat.lat, lon: lngLat.lng });
+  } catch (err) {
+    $('error').textContent = err.message;
+    $('error').hidden = false;
+  }
+}
 function ensureExploreLayers() {
   const map = state.map, ramp = isoRamp();
   if (!map.getSource('iso')) map.addSource('iso', { type: 'geojson', data: lastIso });
@@ -189,6 +281,7 @@ function ensureExploreLayers() {
   }
   applyCutoff();
   buildIsoLegend();
+  ensureTripLayers();
 }
 function applyCutoff() {
   const m = parseInt(checked('cutoff'), 10);
@@ -245,7 +338,7 @@ async function exploreInit() {
 }
 
 function exploreShow(on) {
-  setVisible('iso-fill', on); setVisible('iso-line', on);
+  for (const id of ['iso-fill', 'iso-line', 'trip-casing', 'trip-ride', 'trip-walk', 'trip-end']) setVisible(id, on);
   if (state.marker) { if (on) state.marker.addTo(state.map); else state.marker.remove(); }
 }
 
@@ -260,6 +353,7 @@ async function exploreQuery() {
   const params = { lat: state.lat, lon: state.lon, date, time: timeParam(+$('time').value), max: MAX, band: BAND };
   $('error').hidden = true;
   if (state.map.getLayer('iso-fill')) state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.35);
+  clearTrip();
   try {
     const { fc, note } = await getBackend().isochrone(params);
     lastIso = fc;
@@ -436,13 +530,13 @@ function init() {
     $('tabs').hidden = false;
     for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => setMode(b.dataset.mode));
   }
+  // drag the pin to move the origin; click anywhere to ask how to get there
   map.on('click', (e) => {
     if (state.mode !== 'explore' || !state.marker) return;
     if (e.originalEvent.target.closest('#panel, #bar')) return;
-    state.marker.setLngLat(e.lngLat);
-    state.lon = e.lngLat.lng; state.lat = e.lngLat.lat;
-    exploreQuery();
+    tripTo(e.lngLat);
   });
+  $('trip-close').addEventListener('click', clearTrip);
   map.on('load', () => { state.firstSymbol = firstSymbolLayer(map); setMode(startMode); });
 }
 

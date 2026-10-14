@@ -76,4 +76,13 @@ impl WebEngine {
         fc["properties"] = json!({ "stops_by_transit": stops, "nodes": self.query.reached_node_count() });
         Ok(fc.to_string())
     }
+
+    /// The journey to a point, as JSON, for the most recent `isochrone` call's
+    /// origin, date and time. Err if unreached or if nothing has been routed.
+    pub fn itinerary(&self, to_lat: f64, to_lon: f64) -> Result<String, JsValue> {
+        match self.query.itinerary(to_lat, to_lon, 500.0) {
+            Some(it) => serde_json::to_string(&it).map_err(err),
+            None => Err(err("not reachable within the budget")),
+        }
+    }
 }

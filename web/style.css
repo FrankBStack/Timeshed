@@ -82,6 +82,19 @@ h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.2; font-weight: 700; lette
 .switch input:checked + .knob::after { left: 16px; }
 .switch.disabled { opacity: .45; pointer-events: none; }
 
+/* journey card */
+.trip { margin: 12px 0 4px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; }
+.trip-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13.5px; }
+.trip .x { border: 0; background: transparent; color: var(--ink-3); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.trip .x:hover { color: var(--ink); }
+.legs { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.legs li { display: grid; grid-template-columns: 14px 1fr; gap: 8px; align-items: start; font-size: 12.5px; line-height: 1.35; }
+.legs .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; border: 2px solid var(--ink-3); background: transparent; }
+.legs .dot.ride { border: 0; width: 14px; height: 14px; margin-top: 2px; }
+.legs .when { color: var(--ink-2); }
+.legs b { font-weight: 600; }
+.trip-unreachable { color: var(--ink-2); }
+
 /* legends, tiles, tooltip */
 .legend { margin: 12px 0 0; }
 .legend .bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; }

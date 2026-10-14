@@ -1,6 +1,7 @@
 // Runs the routing engine off the main thread. Messages in:
 //   {type: 'load', bundleUrl, pkgUrl}    -> progress {type:'progress', loaded, total}, then {type:'ready', info}
 //   {type: 'isochrone', id, params}      -> {type:'isochrone', id, geojson, ms} or {type:'error', id, message}
+//   {type: 'itinerary', id, to_lat, to_lon} -> {type:'itinerary', id, json} for the last isochrone's origin and time
 // pkgUrl is the wasm-bindgen glue; the published site hashes its path so it
 // can be cached for a year, so the page tells us where it is.
 
@@ -66,6 +67,9 @@ onmessage = async (e) => {
       const t0 = performance.now();
       const geojson = engine.isochrone(p.lat, p.lon, p.date, p.time, p.max, p.band, p.cell || 100, p.walk_speed || 1.3);
       postMessage({ type: 'isochrone', id: msg.id, geojson, ms: performance.now() - t0 });
+    } else if (msg.type === 'itinerary') {
+      if (!engine) throw new Error('engine not loaded');
+      postMessage({ type: 'itinerary', id: msg.id, json: engine.itinerary(msg.to_lat, msg.to_lon) });
     }
   } catch (err) {
     postMessage({ type: 'error', id: msg.type === 'load' ? 'load' : msg.id, message: err.message || String(err) });

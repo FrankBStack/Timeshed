@@ -40,6 +40,14 @@ try {
   if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent), 120000)) ok('explore routed: ' + await stats());
   else fail('explore did not route: ' + await stats());
 
+  // click a point a little north of the pin: a journey card with at least one leg
+  await page.mouse.click(700, 300);
+  if (await until(() => !document.querySelector('#trip').hidden && document.querySelectorAll('#trip-legs li').length >= 1, 20000)) {
+    ok('journey card: ' + await page.$eval('#trip-title', (el) => el.textContent) + ' / ' + await page.$$eval('#trip-legs li', (els) => els.length) + ' legs');
+  } else fail('no journey card after clicking the map: ' + await page.$eval('#trip-title', (el) => el.textContent));
+  await page.click('#trip-close');
+  if (await until(() => document.querySelector('#trip').hidden, 3000)) ok('journey card closes'); else fail('journey card did not close');
+
   await page.click('#tabs button[data-mode="findings"]');
   if (await until(() => document.querySelectorAll('#tiles .tile').length === 4, 30000)) ok('findings tiles rendered'); else fail('findings tiles missing');
   if (await until(() => !document.querySelector('#findings').hidden && document.querySelector('#explore').hidden, 5000)) ok('findings panel shown'); else fail('panel state wrong after switching to findings');

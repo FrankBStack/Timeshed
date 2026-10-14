@@ -42,7 +42,7 @@
   <aside id="panel">
     <section id="explore" role="tabpanel">
       <h1>Everything you can reach</h1>
-      <p class="lede">Drop a pin anywhere. Walking plus transit, door to door, on the schedule in effect.</p>
+      <p class="lede">Drag the pin anywhere. Walking plus transit, door to door, on the schedule in effect.</p>
 
       <div class="field">
         <div class="field-head"><span class="label">Leaving at</span><output id="time-out" class="value">8:00 am</output></div>
@@ -73,6 +73,11 @@
       <div class="legend" id="iso-legend"></div>
       <p id="stats" class="meta"></p>
       <p id="error" class="error" hidden></p>
+      <div class="trip" id="trip" hidden>
+        <div class="trip-head"><b id="trip-title"></b><button class="x" id="trip-close" aria-label="Clear the journey">×</button></div>
+        <ol class="legs" id="trip-legs"></ol>
+      </div>
+      <p class="muted" id="trip-hint">Click anywhere on the map to see how you'd get there.</p>
       <details>
         <summary>How it works</summary>
         <p>Walking network from OpenStreetMap, schedules from the agency's GTFS feed, routed with an own

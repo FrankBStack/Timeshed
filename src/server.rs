@@ -42,6 +42,7 @@ pub async fn serve(engine: Engine, web_dir: PathBuf, addr: SocketAddr) -> Result
     let app = Router::new()
         .route("/api/info", get(info))
         .route("/api/isochrone", get(isochrone))
+        .route("/api/itinerary", get(itinerary))
         .fallback_service(ServeDir::new(web_dir).append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(App { engine });
@@ -139,6 +140,40 @@ async fn isochrone(State(app): State<App>, Params(p): Params<IsoParams>) -> Resu
                 "nodes": q.reached_node_count(),
             });
             Ok(fc)
+        })
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+struct ItineraryParams {
+    lat: f64,
+    lon: f64,
+    date: NaiveDate,
+    time: String,
+    to_lat: f64,
+    to_lon: f64,
+    #[serde(default = "default_max")]
+    max: u32,
+    #[serde(default = "default_speed")]
+    walk_speed: f64,
+}
+
+/// The journey from (lat, lon) to (to_lat, to_lon): re-runs the query (it is
+/// cheap) and reconstructs. 404 if the destination is out of reach.
+async fn itinerary(State(app): State<App>, Params(p): Params<ItineraryParams>) -> Result<impl IntoResponse, ApiError> {
+    let depart = parse_time(&p.time).map_err(|e| bad(e.to_string()))?.ok_or_else(|| bad("time is required"))?;
+    let opts = QueryOpts { date: p.date, depart, max_secs: p.max * 60, walk_speed_mps: p.walk_speed, ..Default::default() };
+    let engine = app.engine;
+    let result = tokio::task::spawn_blocking(move || {
+        with_query(engine, |q| {
+            if !q.run(p.lat, p.lon, &opts) {
+                return Err(bad("origin is too far from the walking network"));
+            }
+            q.itinerary(p.to_lat, p.to_lon, 500.0)
+                .ok_or((StatusCode::NOT_FOUND, "destination is not reachable within the budget".to_string()))
         })
     })
     .await
