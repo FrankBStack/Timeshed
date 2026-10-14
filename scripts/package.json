@@ -1,0 +1,9 @@
+{
+  "name": "timeshed-scripts",
+  "private": true,
+  "description": "Node helpers for the site build: the headless-browser smoke test",
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}

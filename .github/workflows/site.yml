@@ -76,6 +76,10 @@ jobs:
         run: ./target/release/timeshed build --gtfs data/raw/gtfs/feed.zip --osm data/raw/osm/wisconsin-latest.osm.pbf --name "$BUNDLE_NAME" -o bundle.bin
       - name: Render the site
         run: scripts/build-web.sh bundle.bin
+      - name: Smoke-test the built site in a browser
+        run: |
+          npm --prefix scripts install --silent --no-package-lock
+          node scripts/smoke.mjs docs
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
