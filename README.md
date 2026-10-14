@@ -138,17 +138,17 @@ after 1 am it cuts everyone to four lines.
 
 ```
 GTFS zip ─ gtfs.rs ─ timetable.rs ─┐
-                                   ├─ engine.rs: snap stops, footpaths ─ bundle
-OSM .pbf ─ osm.rs ─ walk.rs ───────┘                                      │
-                                                                          ▼
-query:  walk from the pin ──► raptor.rs ──► walk from every reached stop
-                                                      │
-          isochrone.rs   node labels → 100 m grid → marching squares → bands
-          access.rs      node labels → destination blocks → weighted sums
-          wasm.rs        the same, behind wasm-bindgen, for the browser
-          server.rs      the same, behind axum, for `timeshed serve`
+                                   ├─ engine.rs ─ bundle.bin
+OSM .pbf ─ osm.rs ─ walk.rs ───────┘                │
+                                                    ▼
+query:  walk from pin ─► raptor.rs ─► walk from reached stops
+                                            │
+        isochrone.rs  labels → 100 m grid → contours → bands
+        access.rs     labels → destination blocks → sums
+        wasm.rs       the same, via wasm-bindgen, in the browser
+        server.rs     the same, via axum, for `timeshed serve`
 
-reference.rs: brute force; checks raptor.rs on random feeds and the real one
+reference.rs: brute force; checks raptor.rs on random + real feeds
 ```
 
 - **Timetable.** GTFS routes are regrouped into RAPTOR routes: trips that share an
