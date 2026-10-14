@@ -60,6 +60,17 @@ try {
   await page.click('#tabs button[data-mode="explore"]');
   if (await until(() => document.querySelectorAll('.maplibregl-marker').length === 1, 5000)) ok('pin back after returning to explore'); else fail('pin missing after theme switch');
 
+  // switch city if the page offers more than one: the other engine loads and routes
+  const cityKeys = await page.$$eval('#city option', (els) => els.map((o) => o.value));
+  if (cityKeys.length > 1) {
+    await page.select('#city', cityKeys[1]);
+    if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent) && !/routing/.test(document.querySelector('#stats').textContent), 120000)) {
+      ok(`switched to ${cityKeys[1]}: ` + await stats());
+    } else fail(`city switch to ${cityKeys[1]} did not route: ` + await stats());
+    await page.select('#city', cityKeys[0]);
+    if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent), 120000)) ok(`back to ${cityKeys[0]}`); else fail('switch back did not route');
+  } else ok('single city, no switch to test');
+
   await page.goto(base + '/findings/', { waitUntil: 'networkidle0', timeout: 120000 });
   if (await until(() => !document.querySelector('#findings').hidden, 10000)) ok('/findings/ opens in findings'); else fail('/findings/ did not open in findings mode');
   await page.click('#tabs button[data-mode="explore"]');

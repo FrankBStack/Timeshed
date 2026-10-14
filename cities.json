@@ -1,0 +1,28 @@
+{
+  "milwaukee": {
+    "name": "Milwaukee",
+    "agency": "Milwaukee County Transit",
+    "gtfs": "https://kamino.mcts.org/gtfs/google_transit.zip",
+    "osm": "https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf",
+    "osm_cache": "wisconsin",
+    "findings": {
+      "title": "Where can Milwaukee get to work?",
+      "area": "Milwaukee County",
+      "state_fips": "55",
+      "county_fips": "079"
+    }
+  },
+  "cincinnati": {
+    "name": "Cincinnati",
+    "agency": "Cincinnati Metro",
+    "gtfs": "https://www.go-metro.com/uploads/GTFS/google_transit_info.zip",
+    "osm": "https://download.geofabrik.de/north-america/us/ohio-latest.osm.pbf",
+    "osm_cache": "ohio",
+    "findings": {
+      "title": "Where can Cincinnati get to work?",
+      "area": "Hamilton County",
+      "state_fips": "39",
+      "county_fips": "061"
+    }
+  }
+}

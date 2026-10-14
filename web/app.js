@@ -5,8 +5,13 @@
 // page names a bundle, through the same engine compiled to wasm in a worker.
 // Findings only appear when the page says where the block data is.
 
-const CFG = Object.assign({ base: '', mode: 'explore', bundleUrl: null, pkgUrl: 'pkg/timeshed.js', workerUrl: 'worker.js', bundleBytes: 0, findings: null }, window.TIMESHED || {});
+const CFG = Object.assign({ base: '', mode: 'explore', city: null, cities: null, pkgUrl: 'pkg/timeshed.js', workerUrl: 'worker.js' }, window.TIMESHED || {});
 const $ = (id) => document.getElementById(id);
+// One or more cities. The dev server (no config) is a single unnamed city on
+// the HTTP backend with no Findings; the published site lists each city's
+// bundle and, when the analysis has been run for it, its Findings data.
+const CITIES = CFG.cities || { default: { name: '', bundleUrl: null, bundleBytes: 0, findings: null } };
+const cityCfg = () => CITIES[state.city];
 
 // ----------------------------------------------------------------- theme --
 // Light or dark follows the OS unless the visitor picks one with the button;
@@ -40,12 +45,12 @@ const blues = () => (isDark() ? [...LIGHT_BLUES].reverse() : LIGHT_BLUES);
 const oranges = () => (isDark() ? [...LIGHT_ORANGES].reverse() : LIGHT_ORANGES);
 
 const state = {
-  mode: null, map: null, firstSymbol: undefined,
+  mode: null, map: null, firstSymbol: undefined, city: null,
   // explore
-  lat: null, lon: null, marker: null, info: null, exploreReady: false,
+  lat: null, lon: null, cityOfPin: null, marker: null, info: null, exploreReady: false,
   inFlight: false, queued: false, consented: false,
   // findings
-  window: null, share: false, findingsLoaded: false, hovered: null,
+  window: null, share: false, findingsLoaded: false, findingsWired: false, findingsCity: null, hovered: null,
 };
 
 const hashParams = () => new URLSearchParams(location.hash.slice(1));
@@ -57,6 +62,7 @@ function writeHash() {
     h.set('day', checked('day')); h.set('t', $('time').value); h.set('m', checked('cutoff'));
   }
   if (state.mode === 'findings' && state.window) { h.set('win', state.window); if (state.share) h.set('share', '1'); }
+  if (CFG.cities) h.set('city', state.city);
   history.replaceState(null, '', '#' + h.toString());
 }
 const checked = (name) => (document.querySelector(`input[name="${name}"]:checked`) || {}).value;
@@ -143,10 +149,14 @@ function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
   };
 }
 
-let backend = null;
+const backends = {};
 function getBackend() {
-  if (!backend) backend = CFG.bundleUrl ? wasmBackend(CFG.base + CFG.bundleUrl, CFG.base + CFG.pkgUrl, CFG.base + CFG.workerUrl) : httpBackend();
-  return backend;
+  const key = state.city;
+  if (!backends[key]) {
+    const c = CITIES[key];
+    backends[key] = c.bundleUrl ? wasmBackend(CFG.base + c.bundleUrl, CFG.base + CFG.pkgUrl, CFG.base + CFG.workerUrl) : httpBackend();
+  }
+  return backends[key];
 }
 
 // --------------------------------------------------------------- explore --
@@ -295,7 +305,7 @@ function connectionWantsToAsk() {
   return !!(c && (c.saveData || /(^|-)2g$/.test(c.effectiveType || '')));
 }
 function showLoadGate() {
-  const mb = CFG.bundleBytes ? ` (${(CFG.bundleBytes / 1e6).toFixed(0)} MB)` : '';
+  const mb = cityCfg().bundleBytes ? ` (${(cityCfg().bundleBytes / 1e6).toFixed(0)} MB)` : '';
   $('stats').innerHTML = `<button class="load" id="load">Load the routing engine${mb}</button>
     <span class="muted">You're on a data-saving or slow connection, so the download waits for you.</span>`;
   $('load').addEventListener('click', () => { state.consented = true; exploreInit(); });
@@ -303,10 +313,30 @@ function showLoadGate() {
 
 async function exploreInit() {
   if (state.exploreReady) return;
-  if (CFG.bundleUrl && !state.consented && connectionWantsToAsk()) { showLoadGate(); return; }
+  if (cityCfg().bundleUrl && !state.consented && connectionWantsToAsk()) { showLoadGate(); return; }
   state.exploreReady = true;
+  const h = hashParams();
+  if (h.has('t')) $('time').value = h.get('t');
+  if (h.has('day')) check('day', h.get('day'));
+  if (h.has('m')) check('cutoff', h.get('m'));
+  if (h.has('lat') && h.has('lon')) { state.lat = parseFloat(h.get('lat')); state.lon = parseFloat(h.get('lon')); }
+  $('time-out').textContent = timeLabel(+$('time').value);
+  buildTicks();
+  ensureExploreLayers();
+  state.marker = new maplibregl.Marker({ draggable: true, color: '#d9452b' });
+  state.marker.on('dragend', () => { const p = state.marker.getLngLat(); state.lon = p.lng; state.lat = p.lat; exploreQuery(); });
+  $('time').addEventListener('input', () => { $('time-out').textContent = timeLabel(+$('time').value); exploreQuery(); });
+  $('day').addEventListener('change', exploreQuery);
+  $('cutoff').addEventListener('change', () => { applyCutoff(); writeHash(); });
+  await exploreLoadCity();
+}
+
+// Load (or switch to) the current city's engine: its bundle, dates, centre.
+async function exploreLoadCity() {
   const map = state.map;
+  clearTrip();
   $('stats').textContent = 'loading…';
+  $('error').hidden = true;
   let info;
   try {
     info = await getBackend().info();
@@ -318,22 +348,12 @@ async function exploreInit() {
     return;
   }
   state.info = info;
-  const h = hashParams();
-  if (h.has('t')) $('time').value = h.get('t');
-  if (h.has('day')) check('day', h.get('day'));
-  if (h.has('m')) check('cutoff', h.get('m'));
-  if (h.has('lat') && h.has('lon')) { state.lat = parseFloat(h.get('lat')); state.lon = parseFloat(h.get('lon')); }
-  if (state.lat === null) { state.lon = info.center[0]; state.lat = info.center[1]; }
-  $('time-out').textContent = timeLabel(+$('time').value);
-  buildTicks();
-  ensureExploreLayers();
-
-  state.marker = new maplibregl.Marker({ draggable: true, color: '#d9452b' }).setLngLat([state.lon, state.lat]);
-  state.marker.on('dragend', () => { const p = state.marker.getLngLat(); state.lon = p.lng; state.lat = p.lat; exploreQuery(); });
-  $('time').addEventListener('input', () => { $('time-out').textContent = timeLabel(+$('time').value); exploreQuery(); });
-  $('day').addEventListener('change', exploreQuery);
-  $('cutoff').addEventListener('change', () => { applyCutoff(); writeHash(); });
-  exploreShow(true);
+  $('feed').textContent = `${info.name} · ${info.stops.toLocaleString()} stops · ${info.walk_nodes.toLocaleString()} walking nodes`;
+  if (state.lat === null || state.cityOfPin !== state.city) { state.lon = info.center[0]; state.lat = info.center[1]; }
+  state.cityOfPin = state.city;
+  state.marker.setLngLat([state.lon, state.lat]);
+  exploreShow(state.mode === 'explore');
+  if (state.mode === 'explore') map.flyTo({ center: [state.lon, state.lat], zoom: Math.max(map.getZoom(), 10.6), duration: 900 });
   exploreQuery();
 }
 
@@ -411,8 +431,6 @@ function findingsRender() {
 async function findingsInit() {
   if (state.findingsLoaded) return;
   state.findingsLoaded = true;
-  const map = state.map;
-  const F = CFG.findings;
   const seg = $('windows');
   for (const w of WINDOWS) {
     const l = document.createElement('label');
@@ -426,7 +444,22 @@ async function findingsInit() {
   $('share').checked = state.share;
   seg.addEventListener('change', () => { state.window = checked('win'); findingsRender(); });
   $('share').addEventListener('change', () => { state.share = $('share').checked; findingsRender(); });
+  await findingsLoadCity();
+}
 
+// Load (or switch to) the current city's block data and headline numbers.
+async function findingsLoadCity() {
+  const map = state.map;
+  const F = cityCfg().findings;
+  if (!F) return;
+  $('f-title').textContent = F.title;
+  $('f-lede').textContent = `Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in ${F.area}.`;
+  $('tiles').innerHTML = '';
+  if (state.findingsCity !== state.city) {
+    for (const id of ['blocks', 'blocks-line']) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource('blocks')) map.removeSource('blocks');
+    state.findingsCity = state.city;
+  }
   fetch(CFG.base + F.summary).then((r) => r.json()).then((s) => {
     const am = s.scenarios.weekday_am, night = s.scenarios.weekday_night, owl = s.scenarios.weekday_owl;
     const tiles = [
@@ -439,7 +472,16 @@ async function findingsInit() {
   }).catch(() => {});
 
   ensureFindingsLayers();
+  if (!state.findingsWired) {
+    state.findingsWired = true;
+    wireFindingsHover();
+  }
+  findingsRender();
+  findingsShow(state.mode === 'findings');
+}
 
+function wireFindingsHover() {
+  const map = state.map;
   const tip = $('tip');
   map.on('mousemove', 'blocks', (e) => {
     if (state.mode !== 'findings') return;
@@ -465,13 +507,12 @@ async function findingsInit() {
     map.getCanvas().style.cursor = '';
     tip.style.display = 'none';
   });
-  findingsRender();
-  findingsShow(true);
 }
 
 function ensureFindingsLayers() {
   const map = state.map;
-  if (!map.getSource('blocks')) map.addSource('blocks', { type: 'geojson', data: CFG.base + CFG.findings.blocks, promoteId: 'id' });
+  if (!cityCfg().findings) return;
+  if (!map.getSource('blocks')) map.addSource('blocks', { type: 'geojson', data: CFG.base + cityCfg().findings.blocks, promoteId: 'id' });
   if (!map.getLayer('blocks')) {
     map.addLayer({ id: 'blocks', type: 'fill', source: 'blocks',
       paint: { 'fill-color': stepExpr(currentView()), 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.95, 0.74] } }, state.firstSymbol);
@@ -489,7 +530,7 @@ function findingsShow(on) {
 
 // ----------------------------------------------------------------- modes --
 async function setMode(mode) {
-  if (mode === 'findings' && !CFG.findings) mode = 'explore';
+  if (mode === 'findings' && !cityCfg().findings) mode = 'explore';
   if (state.mode === mode) return;
   state.mode = mode;
   for (const b of document.querySelectorAll('#tabs button')) b.setAttribute('aria-selected', b.dataset.mode === mode ? 'true' : 'false');
@@ -505,9 +546,30 @@ async function setMode(mode) {
   writeHash();
 }
 
+async function setCity(key) {
+  if (!CITIES[key] || key === state.city) return;
+  state.city = key;
+  $('city').value = key;
+  $('tabs').hidden = !cityCfg().findings;
+  if (state.mode === 'findings' && !cityCfg().findings) { await setMode('explore'); }
+  if (state.exploreReady) await exploreLoadCity();
+  if (state.findingsLoaded) await findingsLoadCity();
+  writeHash();
+}
+
 function init() {
   const h = hashParams();
   const startMode = h.get('mode') || CFG.mode;
+  state.city = CITIES[h.get('city')] ? h.get('city') : (CFG.city && CITIES[CFG.city] ? CFG.city : Object.keys(CITIES)[0]);
+  const sel = $('city');
+  for (const [key, c] of Object.entries(CITIES)) {
+    const o = document.createElement('option');
+    o.value = key; o.textContent = c.name || 'Local';
+    sel.appendChild(o);
+  }
+  sel.value = state.city;
+  sel.hidden = Object.keys(CITIES).length < 2;
+  sel.addEventListener('change', () => setCity(sel.value));
   const map = new maplibregl.Map({ container: 'map', style: mapStyle(), center: [-87.95, 43.03], zoom: 10.6, attributionControl: { compact: true } });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   state.map = map;
@@ -526,10 +588,8 @@ function init() {
       findingsShow(state.mode === 'findings' && state.findingsLoaded);
     });
   });
-  if (CFG.findings) {
-    $('tabs').hidden = false;
-    for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => setMode(b.dataset.mode));
-  }
+  $('tabs').hidden = !cityCfg().findings;
+  for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => setMode(b.dataset.mode));
   // drag the pin to move the origin; click anywhere to ask how to get there
   map.on('click', (e) => {
     if (state.mode !== 'explore' || !state.marker) return;

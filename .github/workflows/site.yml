@@ -1,10 +1,11 @@
 name: site
-# Builds and deploys the site: downloads the agency's current schedule, reuses a
-# monthly-cached OSM extract, rebuilds the bundle and the wasm, renders the pages,
-# and ships docs/ to Cloudflare Pages. Runs on relevant pushes, every Monday so a
-# new schedule is picked up, and on demand. Refuses to deploy a feed that does not
-# cover the coming week, so an expiring feed fails loudly instead of leaving the
-# live map routing nothing.
+# Builds and deploys the site for every city in cities.json: downloads each
+# agency's current schedule, reuses a monthly-cached OSM extract, rebuilds the
+# bundles and the wasm, renders the pages, smoke-tests them in a browser, and
+# ships docs/ to Cloudflare Pages. Runs on relevant pushes, every Monday so new
+# schedules are picked up, and on demand. Refuses to deploy a feed that does
+# not cover the coming week, so an expiring feed fails loudly instead of
+# leaving a city's live map routing nothing.
 on:
   push:
     branches: [main]
@@ -12,6 +13,7 @@ on:
       - "web/**"
       - "scripts/**"
       - "src/**"
+      - "cities.json"
       - "Cargo.toml"
       - "Cargo.lock"
       - "docs/data/**"
@@ -25,11 +27,6 @@ on:
 concurrency:
   group: site
   cancel-in-progress: true
-
-env:
-  GTFS_URL: https://kamino.mcts.org/gtfs/google_transit.zip
-  OSM_URL: https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf
-  BUNDLE_NAME: Milwaukee County Transit
 
 jobs:
   build-and-deploy:
@@ -47,35 +44,44 @@ jobs:
       - name: Month stamp for the OSM cache
         id: month
         run: echo "stamp=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
-      - name: Cache the OSM extract, refreshed monthly
-        id: osm
+      - name: Cache the OSM extracts, refreshed monthly
         uses: actions/cache@v4
         with:
-          path: data/raw/osm/wisconsin-latest.osm.pbf
-          key: osm-wisconsin-${{ steps.month.outputs.stamp }}
-      - name: Download the OSM extract
-        if: steps.osm.outputs.cache-hit != 'true'
-        run: mkdir -p data/raw/osm && curl -fsSL "$OSM_URL" -o data/raw/osm/wisconsin-latest.osm.pbf
-      - name: Download the current GTFS feed
-        run: mkdir -p data/raw/gtfs && curl -fsSL "$GTFS_URL" -o data/raw/gtfs/feed.zip
+          path: data/raw/osm
+          key: osm-${{ hashFiles('cities.json') }}-${{ steps.month.outputs.stamp }}
       - name: Build the engine
         run: cargo build --release
-      - name: Check the feed covers today and a week out
+      - name: Download feeds and extracts, build a bundle per city
         run: |
-          for days in 0 7; do
-            d=$(date -u -d "+$days days" +%F)
-            line=$(./target/release/timeshed inspect data/raw/gtfs/feed.zip --date "$d" | tail -1)
-            echo "$line"
-            trips=$(echo "$line" | sed -nE 's/.*services, ([0-9]+) trips.*/\1/p')
-            if [ -z "$trips" ] || [ "$trips" -lt 100 ]; then
-              echo "::error::the feed has ${trips:-0} trips on $d; not deploying"
-              exit 1
-            fi
-          done
-      - name: Build the bundle
-        run: ./target/release/timeshed build --gtfs data/raw/gtfs/feed.zip --osm data/raw/osm/wisconsin-latest.osm.pbf --name "$BUNDLE_NAME" -o bundle.bin
+          set -eu
+          mkdir -p data/raw/osm data/raw/gtfs data/bundles
+          python3 - <<'EOF' > cities.tsv
+          import json
+          for k, c in json.load(open("cities.json")).items():
+              print("\t".join([k, c["gtfs"], c["osm"], c["osm_cache"], c["agency"]]))
+          EOF
+          args=""
+          while IFS=$'\t' read -r key gtfs osm cache agency; do
+            echo "== $key"
+            pbf="data/raw/osm/$cache.osm.pbf"
+            [ -s "$pbf" ] || curl -fsSL "$osm" -o "$pbf"
+            curl -fsSL "$gtfs" -o "data/raw/gtfs/$key.zip"
+            for days in 0 7; do
+              d=$(date -u -d "+$days days" +%F)
+              line=$(./target/release/timeshed inspect "data/raw/gtfs/$key.zip" --date "$d" | tail -1)
+              echo "$line"
+              trips=$(echo "$line" | sed -nE 's/.*services, ([0-9]+) trips.*/\1/p')
+              if [ -z "$trips" ] || [ "$trips" -lt 100 ]; then
+                echo "::error::$key: the feed has ${trips:-0} trips on $d; not deploying"
+                exit 1
+              fi
+            done
+            ./target/release/timeshed build --gtfs "data/raw/gtfs/$key.zip" --osm "$pbf" --name "$agency" -o "data/bundles/$key.bin"
+            args="$args $key=data/bundles/$key.bin"
+          done < cities.tsv
+          echo "BUNDLE_ARGS=$args" >> "$GITHUB_ENV"
       - name: Render the site
-        run: scripts/build-web.sh bundle.bin
+        run: scripts/build-web.sh $BUNDLE_ARGS
       - name: Smoke-test the built site in a browser
         run: |
           npm --prefix scripts install --silent --no-package-lock

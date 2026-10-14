@@ -28,6 +28,7 @@
       <button role="tab" data-mode="explore">Explore</button>
       <button role="tab" data-mode="findings">Findings</button>
     </nav>
+    <select id="city" class="city" aria-label="City" hidden></select>
     <a class="gh" href="https://github.com/FrankBStack/Timeshed" title="Source on GitHub">GitHub</a>
     <button class="theme" id="theme" title="Switch light and dark" aria-label="Switch light and dark">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -89,8 +90,8 @@
     </section>
 
     <section id="findings" role="tabpanel" hidden>
-      <h1>Where can Milwaukee get to work?</h1>
-      <p class="lede">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block in Milwaukee County.</p>
+      <h1 id="f-title">Where can the city get to work?</h1>
+      <p class="lede" id="f-lede">Jobs reachable within 45 minutes, walking plus transit, from every inhabited census block.</p>
       <div class="field">
         <span class="label">Leaving</span>
         <div class="seg wrap" id="windows"></div>

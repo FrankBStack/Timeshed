@@ -2,7 +2,8 @@
 
 [![ci](https://github.com/FrankBStack/Timeshed/actions/workflows/ci.yml/badge.svg)](https://github.com/FrankBStack/Timeshed/actions/workflows/ci.yml)
 
-A door-to-door transit travel time engine, and what it says about Milwaukee after dark.
+A door-to-door transit travel time engine, and what it says about Milwaukee and
+Cincinnati after dark.
 
 Drop a pin anywhere in Milwaukee County and the area you can reach within N minutes by
 walking plus public transit redraws as you drag. The routing is an own implementation of
@@ -16,12 +17,15 @@ so leaving at 8 am and leaving at 11 pm give different shapes.
 
 **Try it:** <https://timeshed.frankbs.dev/>. Drag the pin, scrub the time of day,
 and click anywhere to see how you'd get there. The engine is compiled to WebAssembly
-and runs in your browser; the page downloads the county's schedule and walking network
-once (7 MB) and answers each drag in about 160 ms with no server involved. The
-Findings tab holds the analysis below, block by block.
+and runs in your browser; the page downloads a city's schedule and walking network
+once (7 MB) and answers each drag in about 160 ms with no server involved. The city
+menu switches to Cincinnati; the Findings tab holds the analysis below, block by block,
+for either city.
 
-Everything is built from two free sources: the [MCTS GTFS feed](https://kamino.mcts.org/gtfs/google_transit.zip)
-and the [Geofabrik Wisconsin extract](https://download.geofabrik.de/north-america/us/wisconsin.html).
+Everything is built from two free sources per city: the agency's GTFS feed
+([MCTS](https://kamino.mcts.org/gtfs/google_transit.zip), [Cincinnati Metro](https://www.go-metro.com/uploads/GTFS/google_transit_info.zip))
+and the state's [Geofabrik extract](https://download.geofabrik.de/north-america/us/). Adding
+a city is an entry in `cities.json`.
 
 ## The finding: Milwaukee's transit holds up until midnight, then falls off a cliff
 
@@ -54,7 +58,35 @@ All figures are population weighted.
   downtown, the east side and the Green Line corridor; the south and northwest edges of
   the county fall back to walking distance.
 
-![Jobs reachable within 45 minutes, by departure window](docs/figures/jobs_by_time_of_day.png)
+![Jobs reachable within 45 minutes, by departure window](docs/figures/milwaukee/jobs_by_time_of_day.png)
+
+### The same question in Cincinnati
+
+Cincinnati Metro is a bus-only system of similar size that made the opposite choice:
+under its 2020 levy it put several routes on 24-hour service, and the feed shows up to
+30 after-midnight departures on a single route, with the last at 4:45 am. The same
+five windows for every inhabited block in Hamilton County (7,355 blocks, 830,399
+residents; 534,847 jobs in the county):
+
+| | Milwaukee | Cincinnati |
+|---|---:|---:|
+| Median resident's reach, weekday 7–9 am | 104,226 jobs | 26,156 jobs |
+| Residents reaching 100,000+ in the morning | 51% | 20% |
+| Residents under 5,000 in the morning | 5% | 19% |
+| Share of morning access kept 10 pm–midnight | 79% | 82% |
+| Share kept midnight–2 am | 41% | 60% |
+| Residents losing more than half after midnight | 66% | 38% |
+
+So the all-night routes do what they are for: Cincinnati keeps three fifths of its
+access through the night where Milwaukee keeps two fifths, and far fewer residents fall
+off a cliff. But it is three fifths of a much smaller number. The median Cincinnati
+resident can reach a quarter of the jobs the median Milwaukee resident can at 8 am,
+on hillier ground with slower, longer routes radiating from one downtown hub, and one
+in five Cincinnati residents starts the day under 5,000 jobs. Night service is a
+question of what you keep; daytime frequency is a question of what you have.
+
+Cincinnati's study area stops at the Ohio River: Northern Kentucky's TANK is a
+separate system and is not included, and jobs across the river are not counted.
 
 ### Who loses after midnight
 
@@ -217,9 +249,11 @@ Reproducing the analysis, from the census downloads to the figures, is in
 [`analysis/README.md`](analysis/README.md). The `data/` directory is not committed.
 
 The published site is not committed either: `.github/workflows/site.yml` downloads
-the agency's current schedule, rebuilds the bundle and the wasm, renders the pages
-and deploys them to Cloudflare Pages on every relevant push and every Monday, and
-refuses to deploy a feed that does not cover the coming week.
+each city's current schedule, rebuilds the bundles and the wasm, renders the pages,
+smoke-tests them in a browser and deploys them to Cloudflare Pages on every relevant
+push and every Monday, and refuses to deploy a feed that does not cover the coming
+week. Cities are listed in `cities.json`; a city gets a Findings tab when its analysis
+has been run.
 
 ## Layout
 
