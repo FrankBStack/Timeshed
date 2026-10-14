@@ -12,11 +12,12 @@ OpenStreetMap, so a query covers walking to the stop, riding, transferring and w
 to the door. It routes on the timetable itself rather than on average frequencies,
 so leaving at 8 am and leaving at 11 pm give different shapes.
 
-![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday](docs/figures/live_map.png)
+![Live map: 45 minutes from downtown Milwaukee at 8 am on a weekday, and the journey to a point in Shorewood: the Green Line, a transfer to the Red Line, two short walks](docs/figures/live_map.png)
 
-**Try it:** <https://timeshed.frankbs.dev/>. The engine is compiled to WebAssembly and
-runs in your browser; the page downloads the county's schedule and walking network
-once (7 MB) and answers each drag in about 140 ms with no server involved. The
+**Try it:** <https://timeshed.frankbs.dev/>. Drag the pin, scrub the time of day,
+and click anywhere to see how you'd get there. The engine is compiled to WebAssembly
+and runs in your browser; the page downloads the county's schedule and walking network
+once (7 MB) and answers each drag in about 160 ms with no server involved. The
 Findings tab holds the analysis below, block by block.
 
 Everything is built from two free sources: the [MCTS GTFS feed](https://kamino.mcts.org/gtfs/google_transit.zip)
@@ -191,7 +192,7 @@ from 68% to 86%.
 | Door-to-door query, 45-minute budget | ~13 ms |
 | 60-minute isochrone: 21 ms routing + 41 ms of bands, as GeoJSON | ~60 ms |
 | Batch: 10,690 origins × 12 departures | ~110 s |
-| Same 60-minute isochrone, WebAssembly in Brave, including drawing | ~140 ms |
+| Same 60-minute isochrone, WebAssembly in Brave, including drawing | ~160 ms |
 
 ## Running it
 
