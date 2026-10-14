@@ -16,6 +16,18 @@ use crate::timetable::Timetable;
 
 pub const UNREACHED: u32 = u32::MAX;
 
+/// How a stop's best label was reached, enough to walk a journey back to
+/// its source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Parent {
+    /// one of the sources the search started from
+    Source,
+    /// rode `trip` of `route`, boarded at `from_stop`
+    Trip { route: u32, trip: u32, from_stop: u32 },
+    /// walked a footpath from `from_stop`
+    Walk { from_stop: u32 },
+}
+
 pub struct Raptor {
     /// earliest known arrival per stop
     best: Vec<u32>,
@@ -23,6 +35,7 @@ pub struct Raptor {
     prev: Vec<u32>,
     /// number of transit legs in the journey behind `best`
     legs: Vec<u8>,
+    parent: Vec<Parent>,
     marked: Vec<bool>,
     marked_list: Vec<u32>,
     touched: Vec<u32>,
@@ -38,6 +51,7 @@ impl Raptor {
             best: vec![UNREACHED; tt.stops.len()],
             prev: vec![UNREACHED; tt.stops.len()],
             legs: vec![0; tt.stops.len()],
+            parent: vec![Parent::Source; tt.stops.len()],
             marked: vec![false; tt.stops.len()],
             marked_list: Vec::new(),
             touched: Vec::new(),
@@ -58,7 +72,7 @@ impl Raptor {
             for &(to, meters) in &tt.transfers[s as usize] {
                 let t = from + (meters as f64 * walk_pace).round() as u32;
                 if t <= limit && t < self.best[to as usize] {
-                    self.improve(to, t, legs);
+                    self.improve(to, t, legs, Parent::Walk { from_stop: s });
                     self.footpath_queue.push(to);
                 }
             }
@@ -70,6 +84,7 @@ impl Raptor {
             self.best[s as usize] = UNREACHED;
             self.prev[s as usize] = UNREACHED;
             self.legs[s as usize] = 0;
+            self.parent[s as usize] = Parent::Source;
             self.marked[s as usize] = false;
         }
         self.touched.clear();
@@ -77,13 +92,14 @@ impl Raptor {
     }
 
     #[inline]
-    fn improve(&mut self, stop: u32, time: u32, legs: u8) {
+    fn improve(&mut self, stop: u32, time: u32, legs: u8, parent: Parent) {
         let s = stop as usize;
         if self.best[s] == UNREACHED {
             self.touched.push(stop);
         }
         self.best[s] = time;
         self.legs[s] = legs;
+        self.parent[s] = parent;
         if !self.marked[s] {
             self.marked[s] = true;
             self.marked_list.push(stop);
@@ -108,7 +124,7 @@ impl Raptor {
         self.reset();
         for (s, t) in sources {
             if t <= limit && t < self.best[s as usize] {
-                self.improve(s, t, 0);
+                self.improve(s, t, 0, Parent::Source);
             }
         }
         self.relax_footpaths(tt, walk_pace, limit);
@@ -142,12 +158,13 @@ impl Raptor {
                 let start = std::mem::replace(&mut self.route_pos[r as usize], u32::MAX) as usize;
                 let n = route.stops.len();
                 let mut trip: Option<usize> = None;
+                let mut boarded_at: u32 = 0;
                 for i in start..n {
                     let s = route.stops[i];
                     if let Some(t) = trip {
                         let ev = route.event(t, i);
                         if ev.alight && ev.arr < self.best[s as usize] && ev.arr <= limit {
-                            self.improve(s, ev.arr, round as u8);
+                            self.improve(s, ev.arr, round as u8, Parent::Trip { route: r, trip: t as u32, from_stop: boarded_at });
                         }
                     }
                     // Could we have boarded an earlier trip at this stop?
@@ -177,6 +194,7 @@ impl Raptor {
                     }
                     if t < upper {
                         trip = Some(t);
+                        boarded_at = s;
                     }
                 }
             }
@@ -203,6 +221,31 @@ impl Raptor {
     #[inline]
     pub fn legs(&self, stop: u32) -> u8 {
         self.legs[stop as usize]
+    }
+
+    #[inline]
+    pub fn parent(&self, stop: u32) -> Parent {
+        self.parent[stop as usize]
+    }
+
+    /// The journey behind a stop's label, from its source to the stop: each
+    /// entry is a stop and how it was reached. Empty if the stop is unreached.
+    pub fn journey(&self, stop: u32) -> Vec<(u32, Parent)> {
+        let mut chain = Vec::new();
+        let mut s = stop;
+        if self.arrival(s).is_none() {
+            return chain;
+        }
+        for _ in 0..64 {
+            let p = self.parent(s);
+            chain.push((s, p));
+            match p {
+                Parent::Source => break,
+                Parent::Trip { from_stop, .. } | Parent::Walk { from_stop } => s = from_stop,
+            }
+        }
+        chain.reverse();
+        chain
     }
 
     /// (stop, arrival, legs) for every reached stop.
@@ -293,6 +336,14 @@ mod tests {
         assert_eq!(r.arrival(4), Some(7 * 3600 + 900 + 600 + 100));
         assert_eq!(r.legs(4), 1);
         assert_eq!(r.reached().count(), 5);
+        // and the journeys behind those labels
+        assert_eq!(r.parent(2), Parent::Trip { route: 0, trip: 1, from_stop: 0 });
+        assert_eq!(r.parent(3), Parent::Trip { route: 1, trip: 2, from_stop: 2 });
+        assert_eq!(r.parent(4), Parent::Walk { from_stop: 1 });
+        let j = r.journey(4);
+        assert_eq!(j.iter().map(|x| x.0).collect::<Vec<_>>(), vec![0, 1, 4]);
+        assert_eq!(j[0].1, Parent::Source);
+        assert_eq!(r.journey(3).len(), 3, "0 -> 2 by A, 2 -> 3 by B");
     }
 
     #[test]

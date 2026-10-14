@@ -93,18 +93,25 @@ pub const UNREACHED: u32 = u32::MAX;
 pub struct WalkSearch<'a> {
     g: &'a WalkGraph,
     label: Vec<u32>,
+    /// node we came from, or UNREACHED at a source
+    prev: Vec<u32>,
+    /// the source node whose label this one descends from
+    seed: Vec<u32>,
     touched: Vec<u32>,
     heap: BinaryHeap<Reverse<(u32, u32)>>,
 }
 
 impl<'a> WalkSearch<'a> {
     pub fn new(g: &'a WalkGraph) -> WalkSearch<'a> {
-        WalkSearch { g, label: vec![UNREACHED; g.node_count()], touched: Vec::new(), heap: BinaryHeap::new() }
+        let n = g.node_count();
+        WalkSearch { g, label: vec![UNREACHED; n], prev: vec![UNREACHED; n], seed: vec![UNREACHED; n], touched: Vec::new(), heap: BinaryHeap::new() }
     }
 
     pub fn reset(&mut self) {
         for &n in &self.touched {
             self.label[n as usize] = UNREACHED;
+            self.prev[n as usize] = UNREACHED;
+            self.seed[n as usize] = UNREACHED;
         }
         self.touched.clear();
         self.heap.clear();
@@ -121,6 +128,8 @@ impl<'a> WalkSearch<'a> {
                     self.touched.push(n);
                 }
                 self.label[n as usize] = t;
+                self.prev[n as usize] = UNREACHED;
+                self.seed[n as usize] = n;
                 self.heap.push(Reverse((t, n)));
             }
         }
@@ -135,6 +144,8 @@ impl<'a> WalkSearch<'a> {
                         self.touched.push(m);
                     }
                     self.label[m as usize] = t2;
+                    self.prev[m as usize] = n;
+                    self.seed[m as usize] = self.seed[n as usize];
                     self.heap.push(Reverse((t2, m)));
                 }
             }
@@ -145,6 +156,28 @@ impl<'a> WalkSearch<'a> {
     pub fn label(&self, n: u32) -> Option<u32> {
         let t = self.label[n as usize];
         (t != UNREACHED).then_some(t)
+    }
+
+    /// The source node a reached node's label descends from.
+    #[inline]
+    pub fn seed_of(&self, n: u32) -> Option<u32> {
+        let s = self.seed[n as usize];
+        (s != UNREACHED).then_some(s)
+    }
+
+    /// The walk from a node's source to the node, as node ids; empty if unreached.
+    pub fn path_to(&self, n: u32) -> Vec<u32> {
+        let mut path = Vec::new();
+        if self.label(n).is_none() {
+            return path;
+        }
+        let mut cur = n;
+        while cur != UNREACHED {
+            path.push(cur);
+            cur = self.prev[cur as usize];
+        }
+        path.reverse();
+        path
     }
 
     /// Every (node, label) reached by the last run, in no particular order.
@@ -200,6 +233,12 @@ mod tests {
         assert_eq!(s.label(2), Some(1200));
         assert_eq!(s.label(1), Some(1150));
         assert_eq!(s.label(5), None, "unconnected");
+        // paths and seeds: node 2 was reached from source 4 (1000+200 < 1050+200)
+        assert_eq!(s.seed_of(2), Some(4));
+        assert_eq!(s.path_to(2), vec![4, 3, 2]);
+        assert_eq!(s.seed_of(1), Some(0));
+        assert_eq!(s.path_to(1), vec![0, 1]);
+        assert!(s.path_to(5).is_empty());
     }
 
     #[test]
