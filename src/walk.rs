@@ -80,6 +80,64 @@ impl WalkIndex {
         let p = self.proj.to_xy(lat, lon);
         self.tree.locate_within_distance(p, radius_m * radius_m).map(move |n| (n.data, dist(n.geom(), &p)))
     }
+
+    /// Attach a point to the walking network at the nearest point on the
+    /// nearest edge, not just the nearest node: a point halfway along a
+    /// 150 m block should enter the graph 75 m from either end, not 75 m
+    /// plus a detour. Looks at the edges of the closest few nodes. None if
+    /// nothing is within `max_m`.
+    pub fn snap(&self, g: &WalkGraph, lat: f64, lon: f64, max_m: f64) -> Option<Snap> {
+        let p = self.proj.to_xy(lat, lon);
+        let mut best: Option<Snap> = None;
+        let mut consider = |s: Snap| {
+            if best.as_ref().is_none_or(|b| s.off_m < b.off_m) {
+                best = Some(s);
+            }
+        };
+        for (k, n) in self.tree.nearest_neighbor_iter(p).enumerate() {
+            let d_node = dist(n.geom(), &p);
+            if d_node > max_m || k >= 8 {
+                break;
+            }
+            let u = n.data;
+            let a = *n.geom();
+            consider(Snap { a: u, b: u, to_a_m: 0.0, to_b_m: 0.0, off_m: d_node });
+            for (v, len) in g.neighbours(u) {
+                let (vlat, vlon) = g.lat_lon(v);
+                let b = self.proj.to_xy(vlat, vlon);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let l2 = dx * dx + dy * dy;
+                if l2 < 1e-6 {
+                    continue;
+                }
+                let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2).clamp(0.0, 1.0);
+                let foot = [a[0] + t * dx, a[1] + t * dy];
+                let off = dist(&foot, &p);
+                consider(Snap { a: u, b: v, to_a_m: t * len as f64, to_b_m: (1.0 - t) * len as f64, off_m: off });
+            }
+        }
+        best
+    }
+}
+
+/// Where a point attaches to the network: on the edge between `a` and `b`,
+/// `to_a_m` along the edge from the foot of the perpendicular to `a`,
+/// `to_b_m` to `b`, and `off_m` from the point to the foot. A point snapped
+/// to a node has `a == b` and both distances zero.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Snap {
+    pub a: u32,
+    pub b: u32,
+    pub to_a_m: f64,
+    pub to_b_m: f64,
+    pub off_m: f64,
+}
+
+impl Snap {
+    /// The two (node, meters) anchors a search can start from.
+    pub fn anchors(&self) -> [(u32, f64); 2] {
+        [(self.a, self.to_a_m + self.off_m), (self.b, self.to_b_m + self.off_m)]
+    }
 }
 
 fn dist(a: &[f64; 2], b: &[f64; 2]) -> f64 {
@@ -250,5 +308,26 @@ mod tests {
         assert!(d < 15.0, "{d}");
         assert!(idx.nearest(43.05, -87.9, 100.0).is_none());
         assert_eq!(idx.within(43.0, -87.9, 150.0).count(), 2);
+    }
+
+    #[test]
+    fn snaps_to_the_nearest_point_on_an_edge() {
+        // a point beside the middle of the 1-2 edge (nodes are 100 m apart
+        // along the line, so the midpoint is 50 m from each) and 20 m off it
+        let g = line_graph();
+        let idx = WalkIndex::build(&g);
+        let mid_lat = (g.lat[1] + g.lat[2]) as f64 / 2.0;
+        let s = idx.snap(&g, mid_lat, -87.9 - 20.0 / (111_320.0 * (43.0f64).to_radians().cos()), 100.0).unwrap();
+        let (a, b) = if s.a < s.b { (s.a, s.b) } else { (s.b, s.a) };
+        assert_eq!((a, b), (1, 2), "{s:?}");
+        assert!((s.to_a_m - 50.0).abs() < 2.0 && (s.to_b_m - 50.0).abs() < 2.0, "{s:?}");
+        assert!((s.off_m - 20.0).abs() < 1.0, "{s:?}");
+        let [(na, ma), (nb, mb)] = s.anchors();
+        assert!(na != nb && (ma - 70.0).abs() < 2.0 && (mb - 70.0).abs() < 2.0);
+        // far away: nothing
+        assert!(idx.snap(&g, 44.0, -87.9, 100.0).is_none());
+        // a point right on node 0 snaps to it with zero along-edge distance
+        let s0 = idx.snap(&g, g.lat[0] as f64, g.lon[0] as f64, 100.0).unwrap();
+        assert!(s0.to_a_m < 1.0 && s0.off_m < 1.0, "{s0:?}");
     }
 }

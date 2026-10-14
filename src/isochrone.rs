@@ -1,8 +1,11 @@
 //! Turn a query's node labels into isochrone polygons.
 //!
-//! Reached nodes are splatted onto a regular lon/lat grid (each node
-//! stamps its travel time plus a straight-line walk onto nearby cells), and
-//! marching squares cuts the grid into bands of travel time.
+//! Reached nodes and the edges between them are painted onto a regular
+//! lon/lat grid (each point along the network stamps its travel time plus
+//! a short straight-line walk onto nearby cells), and marching squares cuts
+//! the grid into bands of travel time. Painting along edges rather than
+//! only around nodes keeps long blocks filled and the outline following the
+//! streets instead of a string of discs.
 
 use crate::engine::Query;
 use crate::geo::BBox;
@@ -23,7 +26,7 @@ pub struct IsochroneOpts {
 
 impl Default for IsochroneOpts {
     fn default() -> Self {
-        IsochroneOpts { cell_m: 100.0, reach_m: 250.0, band_secs: 300, max_secs: 45 * 60 }
+        IsochroneOpts { cell_m: 100.0, reach_m: 130.0, band_secs: 300, max_secs: 45 * 60 }
     }
 }
 
@@ -66,11 +69,7 @@ impl Grid {
 
         let r = (opts.reach_m / opts.cell_m).ceil() as i64;
         let pace = q.pace();
-        for (n, t) in q.reached_nodes() {
-            if t > opts.max_secs {
-                continue;
-            }
-            let (lat, lon) = g.lat_lon(n);
+        let mut stamp = |lat: f64, lon: f64, t: f64| {
             let fx = (lon - bbox.min_lon) / dlon;
             let fy = (lat - bbox.min_lat) / dlat;
             let (cx, cy) = (fx.round() as i64, fy.round() as i64);
@@ -80,12 +79,44 @@ impl Grid {
                     let dy = (j as f64 - fy) * opts.cell_m;
                     let d = (dx * dx + dy * dy).sqrt();
                     if d <= opts.reach_m {
-                        let v = t as f64 + d * pace;
+                        let v = t + d * pace;
                         let cell = &mut secs[j as usize * nx + i as usize];
                         if v < *cell {
                             *cell = v;
                         }
                     }
+                }
+            }
+        };
+        let step = opts.cell_m * 0.5;
+        let max = opts.max_secs as f64;
+        for (u, tu) in q.reached_nodes() {
+            if tu > opts.max_secs {
+                continue;
+            }
+            let (ulat, ulon) = g.lat_lon(u);
+            stamp(ulat, ulon, tu as f64);
+            // and along each edge out of here, as far as the budget allows
+            for (v, len) in g.neighbours(u) {
+                let tv = q.node_secs(v).map(|t| t as f64);
+                // each undirected edge once, unless the other end is unreached
+                if tv.is_some() && v < u {
+                    continue;
+                }
+                let (vlat, vlon) = g.lat_lon(v);
+                let len = len as f64;
+                let samples = (len / step).ceil().max(1.0) as usize;
+                for k in 1..samples {
+                    let d = len * k as f64 / samples as f64;
+                    let mut t = tu as f64 + d * pace;
+                    if let Some(tv) = tv {
+                        t = t.min(tv + (len - d) * pace);
+                    }
+                    if t > max {
+                        continue;
+                    }
+                    let f = d / len;
+                    stamp(ulat + (vlat - ulat) * f, ulon + (vlon - ulon) * f, t);
                 }
             }
         }

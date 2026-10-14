@@ -86,7 +86,7 @@ after 1 am it cuts everyone to four lines.
   when every bus is on time. The feed is MCTS's September 2026 schedule; jobs are from
   2023.
 - Walking is 1.3 m/s on the OSM pedestrian network, with footpaths between stops up to
-  1 km. Stops and blocks are snapped to the nearest walkable node.
+  1 km. Stops, pins and blocks attach to the nearest point on the nearest walkable edge.
 - No boarding slack by default: a bus that leaves the second you reach the stop counts
   as caught. r5 and OpenTripPlanner assume a minute. Rerunning every window with
   `--board-slack 60` lowers the levels by 10 to 16% (the morning median falls from
@@ -130,9 +130,12 @@ OSM .pbf ──> osm.rs  ──> walk.rs ───────┘               
   (valid because routes are non-overtaking), and footpaths relaxed to a fixed point
   after each round, since ours are a bounded walking search rather than a transitive
   closure.
-- **Door to door.** A bounded Dijkstra from the origin seeds every stop in walking
-  reach; RAPTOR runs; a multi-source Dijkstra from every reached stop labels the walking
-  nodes. Isochrones splat node labels onto a 100 m grid and cut it into 5-minute bands.
+- **Door to door.** The pin attaches to the nearest point on the nearest edge (both
+  ends become sources); a bounded Dijkstra seeds every stop in walking reach; RAPTOR
+  runs; a multi-source Dijkstra from every reached stop labels the walking nodes.
+  Isochrones paint node labels and the edges between them onto a 100 m grid and cut it
+  into 5-minute bands. Clicking a point reconstructs the journey from the round-indexed
+  RAPTOR labels and the walking predecessors.
 - **Batch.** Destinations are snapped once; each origin's query is read at each
   destination's node. Rayon runs origins in parallel with one query workspace per
   thread.
@@ -168,14 +171,16 @@ budget. The two share no code; the only rule copied is R5's 60-second boarding s
 
 | | |
 |---|---:|
-| Pairs reachable by both within two hours | 19,425 of 22,500 |
-| Reachable by only one router (nearly all over 80 minutes, at the edge of the budget) | 780 Timeshed, 51 r5 |
-| Median difference (Timeshed minus r5; r5 reports whole minutes) | +0.5 min |
-| Within 1 / 2 / 5 minutes | 68% / 86% / 92% |
-| 10th to 90th percentile of the difference, trips under 90 minutes | −0.7 to +2.6 min |
+| Pairs reachable by both within two hours | 19,474 of 22,500 |
+| Reachable by only one router (nearly all over 80 minutes, at the edge of the budget) | 854 Timeshed, 2 r5 |
+| Median difference (Timeshed minus r5; r5 reports whole minutes) | +0.4 min |
+| Within 1 / 2 / 5 minutes | 86% / 91% / 95% |
+| 95th percentile of the absolute difference | 5.5 min |
 
-The remaining tail is long trips near the budget and a handful of points where the
-two routers attach a point to the street network differently.
+Most of what remained after the slack fix was how points attach to the street
+network: snapping to the nearest node could cost a detour of a block, and attaching
+to the nearest point on the nearest edge instead took the share within a minute
+from 68% to 86%.
 
 ### Numbers on a 12-core laptop
 

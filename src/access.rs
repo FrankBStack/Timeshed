@@ -79,29 +79,11 @@ pub struct Row {
     pub reached: Vec<f64>,
 }
 
-/// Snapped destinations: node plus straight-line walk, in parallel arrays.
-struct SnappedDests {
-    node: Vec<u32>,
-    snap_m: Vec<f64>,
-}
-
 pub fn run(engine: &Engine, origins: &[Origin], dests: &Dests, opts: &AccessOpts) -> Vec<Row> {
     let index = engine.index();
-    let mut snapped = SnappedDests { node: Vec::with_capacity(dests.dests.len()), snap_m: Vec::with_capacity(dests.dests.len()) };
-    let mut off = 0usize;
-    for d in &dests.dests {
-        match index.nearest(d.lat, d.lon, opts.dest_snap_max_m) {
-            Some((n, m)) => {
-                snapped.node.push(n);
-                snapped.snap_m.push(m);
-            }
-            None => {
-                off += 1;
-                snapped.node.push(u32::MAX);
-                snapped.snap_m.push(0.0);
-            }
-        }
-    }
+    let snapped: Vec<Option<crate::walk::Snap>> =
+        dests.dests.iter().map(|d| index.snap(&engine.walk, d.lat, d.lon, opts.dest_snap_max_m)).collect();
+    let off = snapped.iter().filter(|s| s.is_none()).count();
     if off > 0 {
         log::warn!("{off} of {} destinations are more than {} m from the walking network", dests.dests.len(), opts.dest_snap_max_m);
     }
@@ -123,19 +105,14 @@ pub fn run(engine: &Engine, origins: &[Origin], dests: &Dests, opts: &AccessOpts
                     let mut reached = vec![0.0; nw];
                     let mut count = 0u32;
                     if on_network {
-                        let pace = q.pace();
-                        for (i, d) in dests.dests.iter().enumerate() {
-                            let n = snapped.node[i];
-                            if n == u32::MAX {
-                                continue;
-                            }
-                            if let Some(t) = q.node_secs(n) {
-                                let t = t + (snapped.snap_m[i] * pace).round() as u32;
-                                if t <= qo.max_secs {
-                                    count += 1;
-                                    for (acc, w) in reached.iter_mut().zip(&d.weights) {
-                                        *acc += w;
-                                    }
+                        for (d, snap) in dests.dests.iter().zip(&snapped) {
+                            let Some(snap) = snap else { continue };
+                            if let Some(t) = q.snap_secs(snap)
+                                && t <= qo.max_secs
+                            {
+                                count += 1;
+                                for (acc, w) in reached.iter_mut().zip(&d.weights) {
+                                    *acc += w;
                                 }
                             }
                         }
@@ -172,7 +149,7 @@ pub fn write_rows(path: &Path, names: &[String], rows: &[Row]) -> Result<()> {
 /// origin order, each a Vec in destination order.
 pub fn matrix(engine: &Engine, origins: &[Origin], dests: &[Dest], opts: &QueryOpts, dest_snap_max_m: f64) -> Vec<Vec<Option<u32>>> {
     let index = engine.index();
-    let snapped: Vec<Option<(u32, f64)>> = dests.iter().map(|d| index.nearest(d.lat, d.lon, dest_snap_max_m)).collect();
+    let snapped: Vec<Option<crate::walk::Snap>> = dests.iter().map(|d| index.snap(&engine.walk, d.lat, d.lon, dest_snap_max_m)).collect();
     origins
         .par_iter()
         .map_init(
@@ -181,12 +158,10 @@ pub fn matrix(engine: &Engine, origins: &[Origin], dests: &[Dest], opts: &QueryO
                 if !q.run(o.lat, o.lon, opts) {
                     return vec![None; dests.len()];
                 }
-                let pace = q.pace();
                 snapped
                     .iter()
                     .map(|s| {
-                        let (n, m) = (*s)?;
-                        let t = q.node_secs(n)? + (m * pace).round() as u32;
+                        let t = q.snap_secs(s.as_ref()?)?;
                         (t <= opts.max_secs).then_some(t)
                     })
                     .collect()
