@@ -1,7 +1,7 @@
 //! The routing bundle: timetable + walking graph + the glue between them,
 //! and the door-to-door query that runs on it.
 
-use crate::raptor::Raptor;
+use crate::raptor::{Parent, Raptor};
 use crate::timetable::Timetable;
 use crate::walk::{WalkGraph, WalkIndex, WalkSearch};
 use anyhow::Result;
@@ -184,9 +184,40 @@ impl Default for QueryOpts {
     }
 }
 
+/// One leg of a reconstructed journey. Coordinates are [lon, lat].
+#[derive(Serialize, Debug, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Leg {
+    Walk { secs: u32, meters: f32, path: Vec<[f64; 2]> },
+    Ride {
+        route: String,
+        long_name: String,
+        color: Option<String>,
+        from: String,
+        to: String,
+        /// seconds after midnight of the service day
+        depart: u32,
+        arrive: u32,
+        /// stops ridden past, i.e. alight index minus board index
+        stops: u32,
+        path: Vec<[f64; 2]>,
+    },
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct Itinerary {
+    pub depart: u32,
+    pub arrive: u32,
+    pub total_secs: u32,
+    pub legs: Vec<Leg>,
+}
+
 /// A reusable query workspace. One per thread.
 pub struct Query<'a> {
     pub engine: &'a Engine,
+    /// the walk out from the origin that seeds the stops
+    origin_walk: WalkSearch<'a>,
+    /// the walk from every reached stop that labels the nodes
     walk: WalkSearch<'a>,
     raptor: Raptor,
     active: Option<(NaiveDate, Vec<bool>)>,
@@ -199,6 +230,7 @@ impl<'a> Query<'a> {
     pub fn new(engine: &'a Engine) -> Query<'a> {
         Query {
             engine,
+            origin_walk: WalkSearch::new(&engine.walk),
             walk: WalkSearch::new(&engine.walk),
             raptor: Raptor::new(&engine.tt),
             active: None,
@@ -230,9 +262,9 @@ impl<'a> Query<'a> {
         let limit = opts.depart + opts.max_secs;
 
         // 1. walk from the origin to every stop in reach
-        self.walk.run([(origin, start)], limit, pace);
+        self.origin_walk.run([(origin, start)], limit, pace);
         let mut sources: Vec<(u32, u32)> = Vec::new();
-        for (node, t) in self.walk.reached() {
+        for (node, t) in self.origin_walk.reached() {
             if let Some(stops) = e.node_stops.get(&node) {
                 for &s in stops {
                     sources.push((s, t + (e.stop_snap_m[s as usize] as f64 * pace).round() as u32));
@@ -284,6 +316,85 @@ impl<'a> Query<'a> {
     /// Seconds per meter used by the last run.
     pub fn pace(&self) -> f64 {
         self.pace
+    }
+
+    /// The journey behind the last run's label at a point: walk, rides and
+    /// transfers, walk. None if the point is off the network or unreached.
+    pub fn itinerary(&self, lat: f64, lon: f64, snap_max_m: f64) -> Option<Itinerary> {
+        let e = self.engine;
+        let g = &e.walk;
+        let pace = self.pace;
+        let origin = self.origin?;
+        let (end_node, end_m) = e.index().nearest(lat, lon, snap_max_m)?;
+        let arrive_node = self.walk.label(end_node)?;
+        let seed = self.walk.seed_of(end_node)?;
+        let node_xy = |n: u32| { let (la, lo) = g.lat_lon(n); [lo, la] };
+        let walk_leg = |path: Vec<u32>, extra_m: f64, tail: Option<[f64; 2]>| -> Leg {
+            let mut meters = 0.0f64;
+            for w in path.windows(2) {
+                meters += g.neighbours(w[0]).find(|(m, _)| *m == w[1]).map(|(_, d)| d as f64).unwrap_or(0.0);
+            }
+            let mut coords: Vec<[f64; 2]> = path.iter().map(|&n| node_xy(n)).collect();
+            if let Some(t) = tail { coords.push(t); }
+            Leg::Walk { secs: ((meters + extra_m) * pace).round() as u32, meters: (meters + extra_m) as f32, path: coords }
+        };
+        let mut legs: Vec<Leg> = Vec::new();
+
+        if seed == origin && self.walk.label(seed) == self.origin_walk.label(origin) {
+            // walked the whole way
+            legs.push(walk_leg(self.walk.path_to(end_node), end_m, Some([lon, lat])));
+        } else {
+            // which stop seeded the final walk? the one whose arrival matches the seed's label
+            let last_stop = *e.node_stops.get(&seed)?.iter().min_by_key(|&&s| {
+                self.raptor.arrival(s).map_or(u32::MAX, |a| a + (e.stop_snap_m[s as usize] as f64 * pace).round() as u32)
+            })?;
+            let chain = self.raptor.journey(last_stop);
+            let (first_stop, _) = *chain.first()?;
+            // walk from the origin to the first stop
+            let first_node = e.stop_node[first_stop as usize];
+            let st = &e.tt.stops[first_stop as usize];
+            legs.push(walk_leg(self.origin_walk.path_to(first_node), e.stop_snap_m[first_stop as usize] as f64, Some([st.lon, st.lat])));
+            for &(stop, parent) in &chain[1..] {
+                match parent {
+                    Parent::Source => {}
+                    Parent::Trip { route, trip, from_stop } => {
+                        let r = &e.tt.routes[route as usize];
+                        let info = &e.tt.route_info[r.info as usize];
+                        let i = r.stops.iter().position(|&x| x == from_stop)?;
+                        let j = (i + 1..r.stops.len()).find(|&k| r.stops[k] == stop)?;
+                        let path = r.stops[i..=j].iter().map(|&x| { let st = &e.tt.stops[x as usize]; [st.lon, st.lat] }).collect();
+                        legs.push(Leg::Ride {
+                            route: if info.short_name.is_empty() { info.long_name.clone() } else { info.short_name.clone() },
+                            long_name: info.long_name.clone(),
+                            color: info.color.clone(),
+                            from: e.tt.stops[from_stop as usize].name.clone(),
+                            to: e.tt.stops[stop as usize].name.clone(),
+                            depart: r.event(trip as usize, i).dep,
+                            arrive: r.event(trip as usize, j).arr,
+                            stops: (j - i) as u32,
+                            path,
+                        });
+                    }
+                    Parent::Walk { from_stop } => {
+                        let a = &e.tt.stops[from_stop as usize];
+                        let b = &e.tt.stops[stop as usize];
+                        let meters = e.tt.transfers[from_stop as usize].iter().find(|(to, _)| *to == stop).map_or(0.0, |(_, m)| *m);
+                        legs.push(Leg::Walk { secs: (meters as f64 * pace).round() as u32, meters, path: vec![[a.lon, a.lat], [b.lon, b.lat]] });
+                    }
+                }
+            }
+            // walk from the last stop to the point
+            let st = &e.tt.stops[last_stop as usize];
+            let mut path = self.walk.path_to(end_node);
+            let mut coords_prefix = vec![[st.lon, st.lat]];
+            let leg = walk_leg(std::mem::take(&mut path), e.stop_snap_m[last_stop as usize] as f64 + end_m, Some([lon, lat]));
+            if let Leg::Walk { secs, meters, path } = leg {
+                coords_prefix.extend(path);
+                legs.push(Leg::Walk { secs, meters, path: coords_prefix });
+            }
+        }
+        let arrive = arrive_node + (end_m * pace).round() as u32;
+        Some(Itinerary { depart: self.depart, arrive, total_secs: arrive - self.depart, legs })
     }
 
     pub fn origin_node(&self) -> Option<u32> {

@@ -75,6 +75,11 @@ enum Cmd {
         /// Write the isochrone bands as GeoJSON to this file
         #[arg(long)]
         geojson: Option<PathBuf>,
+        /// Also print the journey to this destination (with --to-lon)
+        #[arg(long, allow_negative_numbers = true)]
+        to_lat: Option<f64>,
+        #[arg(long, allow_negative_numbers = true)]
+        to_lon: Option<f64>,
     },
     /// Serve the live map and the HTTP API
     Serve {
@@ -225,7 +230,7 @@ fn main() -> Result<()> {
             engine.save(&out)?;
             log::info!("wrote {} in {:.1?}", out.display(), t0.elapsed());
         }
-        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed, board_slack, geojson } => {
+        Cmd::Query { bundle, lat, lon, date, time, max, walk_speed, board_slack, geojson, to_lat, to_lon } => {
             let t0 = std::time::Instant::now();
             let engine = Engine::load(&bundle)?;
             log::info!("loaded {} ({} stops, {} nodes) in {:.1?}", engine.name, engine.tt.stops.len(), engine.walk.node_count(), t0.elapsed());
@@ -253,6 +258,22 @@ fn main() -> Result<()> {
             for (s, secs, legs) in far.iter().take(5) {
                 let st = &engine.tt.stops[*s as usize];
                 println!("  {:>5} min, {legs} trips: {} ({}, {})", secs / 60, st.name, st.lat, st.lon);
+            }
+            if let (Some(to_lat), Some(to_lon)) = (to_lat, to_lon) {
+                match q.itinerary(to_lat, to_lon, 500.0) {
+                    None => println!("({to_lat}, {to_lon}) is not reachable within {max} min"),
+                    Some(it) => {
+                        println!("to ({to_lat}, {to_lon}): {} min, arrive {}", it.total_secs / 60, format_time(it.arrive));
+                        for leg in &it.legs {
+                            match leg {
+                                timeshed::engine::Leg::Walk { secs, meters, .. } => println!("  walk {} min ({meters:.0} m)", (secs + 30) / 60),
+                                timeshed::engine::Leg::Ride { route, from, to, depart, arrive, stops, .. } => {
+                                    println!("  ride {route} from {from} ({}) to {to} ({}), {stops} stops", format_time(*depart), format_time(*arrive))
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if let Some(path) = geojson {
                 let t2 = std::time::Instant::now();
