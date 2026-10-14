@@ -47,7 +47,7 @@ const oranges = () => (isDark() ? [...LIGHT_ORANGES].reverse() : LIGHT_ORANGES);
 const state = {
   mode: null, map: null, firstSymbol: undefined, city: null,
   // explore
-  lat: null, lon: null, cityOfPin: null, marker: null, info: null, exploreReady: false,
+  lat: null, lon: null, cityOfPin: null, lastFlownCity: null, marker: null, info: null, exploreReady: false,
   inFlight: false, queued: false, consented: false,
   // findings
   window: null, share: false, findingsLoaded: false, findingsWired: false, findingsCity: null, hovered: null,
@@ -353,7 +353,10 @@ async function exploreLoadCity() {
   state.cityOfPin = state.city;
   state.marker.setLngLat([state.lon, state.lat]);
   exploreShow(state.mode === 'explore');
-  if (state.mode === 'explore') map.flyTo({ center: [state.lon, state.lat], zoom: Math.max(map.getZoom(), 10.6), duration: 900 });
+  if (state.mode === 'explore' && state.cityOfPin !== state.lastFlownCity) {
+    map.flyTo({ center: cityCfg().center || [state.lon, state.lat], zoom: cityCfg().zoom || 10.6, duration: 900 });
+    state.lastFlownCity = state.city;
+  }
   exploreQuery();
 }
 
@@ -458,7 +461,9 @@ async function findingsLoadCity() {
   if (state.findingsCity !== state.city) {
     for (const id of ['blocks', 'blocks-line']) if (map.getLayer(id)) map.removeLayer(id);
     if (map.getSource('blocks')) map.removeSource('blocks');
+    const moved = state.findingsCity !== null;
     state.findingsCity = state.city;
+    if (moved && state.mode === 'findings' && cityCfg().center) map.flyTo({ center: cityCfg().center, zoom: cityCfg().zoom || 10.6, duration: 900 });
   }
   fetch(CFG.base + F.summary).then((r) => r.json()).then((s) => {
     const am = s.scenarios.weekday_am, night = s.scenarios.weekday_night, owl = s.scenarios.weekday_owl;
@@ -570,7 +575,9 @@ function init() {
   sel.value = state.city;
   sel.hidden = Object.keys(CITIES).length < 2;
   sel.addEventListener('change', () => setCity(sel.value));
-  const map = new maplibregl.Map({ container: 'map', style: mapStyle(), center: [-87.95, 43.03], zoom: 10.6, attributionControl: { compact: true } });
+  const start = cityCfg();
+  const map = new maplibregl.Map({ container: 'map', style: mapStyle(), center: start.center || [-87.95, 43.03], zoom: start.zoom || 10.6, attributionControl: { compact: true } });
+  window.timeshed = state; // test hook: the smoke test reads the map position through it
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   state.map = map;
   $('theme').addEventListener('click', () => {

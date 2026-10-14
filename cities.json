@@ -2,6 +2,11 @@
   "milwaukee": {
     "name": "Milwaukee",
     "agency": "Milwaukee County Transit",
+    "center": [
+      -87.95,
+      43.03
+    ],
+    "zoom": 10.6,
     "gtfs": "https://kamino.mcts.org/gtfs/google_transit.zip",
     "osm": "https://download.geofabrik.de/north-america/us/wisconsin-latest.osm.pbf",
     "osm_cache": "wisconsin",
@@ -15,6 +20,11 @@
   "cincinnati": {
     "name": "Cincinnati",
     "agency": "Cincinnati Metro",
+    "center": [
+      -84.51,
+      39.14
+    ],
+    "zoom": 10.6,
     "gtfs": "https://www.go-metro.com/uploads/GTFS/google_transit_info.zip",
     "osm": "https://download.geofabrik.de/north-america/us/ohio-latest.osm.pbf",
     "osm_cache": "ohio",

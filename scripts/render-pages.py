@@ -86,8 +86,8 @@ for key, c in cities.items():
         f = c["findings"]
         findings = {"title": f["title"], "area": f["area"],
                     "blocks": f"data/{key}/blocks.geojson", "summary": f"data/{key}/summary.json"}
-    city_cfg[key] = {"name": c["name"], "agency": c["agency"], "bundleUrl": bundles[key][0],
-                     "bundleBytes": bundles[key][1], "findings": findings}
+    city_cfg[key] = {"name": c["name"], "agency": c["agency"], "center": c["center"], "zoom": c["zoom"],
+                     "bundleUrl": bundles[key][0], "bundleBytes": bundles[key][1], "findings": findings}
 first = next(iter(city_cfg))
 
 

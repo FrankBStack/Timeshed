@@ -71,10 +71,34 @@ try {
     if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent), 120000)) ok(`back to ${cityKeys[0]}`); else fail('switch back did not route');
   } else ok('single city, no switch to test');
 
+  // in Findings, switching city must move the map and swap the data
+  if (cityKeys.length > 1) {
+    await page.click('#tabs button[data-mode="findings"]');
+    await until(() => document.querySelectorAll('#tiles .tile').length === 4, 30000);
+    const before = await page.evaluate(() => window.timeshed.map.getCenter().lng);
+    await page.select('#city', cityKeys[1]);
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = await page.evaluate(() => window.timeshed.map.getCenter().lng);
+    const title = await page.$eval('#f-title', (el) => el.textContent);
+    if (Math.abs(after - before) > 0.5 && /Cincinnati/.test(title)) ok(`findings follows the city: ${before.toFixed(2)} -> ${after.toFixed(2)}, "${title}"`);
+    else fail(`findings did not follow the city switch: lng ${before.toFixed(2)} -> ${after.toFixed(2)}, title "${title}"`);
+    await page.select('#city', cityKeys[0]);
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+
   await page.goto(base + '/findings/', { waitUntil: 'networkidle0', timeout: 120000 });
   if (await until(() => !document.querySelector('#findings').hidden, 10000)) ok('/findings/ opens in findings'); else fail('/findings/ did not open in findings mode');
   await page.click('#tabs button[data-mode="explore"]');
   if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent), 120000)) ok('explore routes from /findings/'); else fail('explore did not route from /findings/: ' + await stats());
+
+  // a second city's findings entry page opens on that city
+  if (cityKeys.length > 1) {
+    await page.goto(`${base}/${cityKeys[1]}/findings/`, { waitUntil: 'networkidle0', timeout: 120000 });
+    await until(() => document.querySelectorAll('#tiles .tile').length === 4, 30000);
+    const lng = await page.evaluate(() => window.timeshed.map.getCenter().lng);
+    const expected = await page.evaluate((k) => window.TIMESHED.cities[k].center[0], cityKeys[1]);
+    if (Math.abs(lng - expected) < 0.3) ok(`/${cityKeys[1]}/findings/ opens on ${cityKeys[1]}`); else fail(`/${cityKeys[1]}/findings/ opened at lng ${lng.toFixed(2)}, expected ${expected}`);
+  }
 
   const res = await fetch(base + '/live/');
   if (res.ok && /url=\.\.\//.test(await res.text())) ok('/live/ redirects'); else fail('/live/ redirect missing');
