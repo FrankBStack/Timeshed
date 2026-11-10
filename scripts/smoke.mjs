@@ -85,6 +85,10 @@ try {
   await page.click('#tabs button[data-mode="explore"]');
   if (await until(() => document.querySelectorAll('.maplibregl-marker').length === 1, 5000)) ok('pin back after returning to explore'); else fail('pin missing after theme switch');
 
+  // the edge of the walking network is drawn, and the theme switch did not drop it
+  if (await page.evaluate(() => { const m = window.timeshed.map; return !!m.getLayer('extent-line') && m.getSource('extent').serialize().data.features.length === 2; })) ok('network edge drawn');
+  else fail('network edge missing after the theme switch');
+
   // switch city if the page offers more than one: the other engine loads and routes
   const cityKeys = await page.$$eval('#city option', (els) => els.map((o) => o.value));
   if (cityKeys.length > 1) {

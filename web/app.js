@@ -222,6 +222,20 @@ function buildIsoLegend() {
   $('iso-legend').innerHTML = `<div class="bar">${bar.join('')}</div><div class="ticks-row"><span>here</span><span>travel time</span><span>60 min</span></div>`;
 }
 let lastIso = { type: 'FeatureCollection', features: [] };
+// Where the bundle's streets end: everything outside the walking graph's box
+// is washed out behind a dashed edge, so the limit shows before a pin finds it.
+let lastExtent = { type: 'FeatureCollection', features: [] };
+function setExtent(info) {
+  const b = info.walk_bbox;
+  if (!b) return;
+  const box = [[b[0], b[1]], [b[0], b[3]], [b[2], b[3]], [b[2], b[1]], [b[0], b[1]]];
+  const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
+  lastExtent = { type: 'FeatureCollection', features: [
+    { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [world, box] } },
+    { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: box } },
+  ] };
+  if (state.map.getSource('extent')) state.map.getSource('extent').setData(lastExtent);
+}
 let lastTrip = { type: 'FeatureCollection', features: [] };
 function ensureTripLayers() {
   const map = state.map;
@@ -300,6 +314,13 @@ async function tripTo(lngLat) {
 }
 function ensureExploreLayers() {
   const map = state.map, ramp = isoRamp();
+  if (!map.getSource('extent')) map.addSource('extent', { type: 'geojson', data: lastExtent });
+  if (!map.getLayer('extent-fill')) {
+    map.addLayer({ id: 'extent-fill', type: 'fill', source: 'extent', filter: ['==', ['geometry-type'], 'Polygon'],
+      paint: { 'fill-color': outline(), 'fill-opacity': 0.5 } }, state.firstSymbol);
+    map.addLayer({ id: 'extent-line', type: 'line', source: 'extent', filter: ['==', ['geometry-type'], 'LineString'],
+      paint: { 'line-color': isDark() ? '#7c7b75' : '#8a8982', 'line-width': 1, 'line-dasharray': [2, 3], 'line-opacity': 0.8 } }, state.firstSymbol);
+  }
   if (!map.getSource('iso')) map.addSource('iso', { type: 'geojson', data: lastIso });
   const colorExpr = ['step', ['get', 'from'], ramp[0]];
   for (let i = 1; i < ramp.length; i++) colorExpr.push(i * BAND, ramp[i]);
@@ -374,6 +395,7 @@ async function exploreLoadCity() {
     return;
   }
   state.info = info;
+  setExtent(info);
   $('feed').textContent = `${info.name} · ${info.stops.toLocaleString()} stops · ${info.walk_nodes.toLocaleString()} walking nodes`;
   if (state.lat === null || state.cityOfPin !== state.city) { state.lon = info.center[0]; state.lat = info.center[1]; }
   if (state.good && state.good.city !== state.city) state.good = null;
@@ -388,7 +410,7 @@ async function exploreLoadCity() {
 }
 
 function exploreShow(on) {
-  for (const id of ['iso-fill', 'iso-line', 'trip-casing', 'trip-ride', 'trip-walk', 'trip-end']) setVisible(id, on);
+  for (const id of ['extent-fill', 'extent-line', 'iso-fill', 'iso-line', 'trip-casing', 'trip-ride', 'trip-walk', 'trip-end']) setVisible(id, on);
   if (state.marker) { if (on) state.marker.addTo(state.map); else state.marker.remove(); }
 }
 
