@@ -26,6 +26,7 @@ const outline = () => (isDark() ? '#181817' : '#f3f2ee');
 function applyThemeClass() {
   document.documentElement.dataset.theme = theme;
   document.documentElement.classList.toggle('system-dark', isDark());
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = outline();
 }
 applyThemeClass();
 

@@ -6,6 +6,7 @@ one bundle per city.
 
 Everything but the pages goes under a content-hashed path (so the host can
 cache it for a year); the pages are short-lived and name the current files.
+The icons keep their conventional names at the root, where browsers look.
 Cities come from cities.json; a city gets a Findings tab when
 docs/data/<city>/summary.json exists. Pages written:
 
@@ -28,6 +29,7 @@ web = root / "web"
 template = (web / "index.html").read_text()
 cities = json.loads((root / "cities.json").read_text())
 SITE = "https://timeshed.frankbs.dev/"
+ICONS = ["favicon.ico", "favicon.svg", "apple-touch-icon.png"]
 
 
 def digest(path: Path) -> str:
@@ -70,6 +72,8 @@ for stale in docs.glob("bundle/*.bin.gz"):
 app = hashed_copy(web / "app.js", "assets")
 style = hashed_copy(web / "style.css", "assets")
 worker = hashed_copy(web / "worker.js", "assets")
+for icon in ICONS:
+    shutil.copy2(web / icon, docs / icon)
 pkg_hash = digest(web / "pkg" / "timeshed_bg.wasm")
 (docs / "pkg" / pkg_hash).mkdir(parents=True, exist_ok=True)
 for f in ["timeshed.js", "timeshed_bg.wasm"]:
@@ -108,6 +112,8 @@ def render(base, city, mode, title, og_tags):
     page = page.replace("  <!-- CONFIG -->", f"  <script>window.TIMESHED = {json.dumps(cfg)};</script>")
     page = page.replace("<title>Timeshed</title>", f"<title>{title}</title>")
     page = page.replace('"style.css"', f'"{base}{style}"').replace('"app.js"', f'"{base}{app}"')
+    for icon in ICONS:
+        page = page.replace(f'"{icon}"', f'"{base}{icon}"')
     return page
 
 
