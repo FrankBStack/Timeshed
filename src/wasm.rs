@@ -33,6 +33,7 @@ impl WebEngine {
     pub fn info(&self) -> String {
         let e = self.engine;
         let b = e.tt.bbox();
+        let w = &e.walk.bbox;
         let c = e.tt.centroid();
         let (first, last) = e.tt.services.date_range().unwrap_or((NaiveDate::MIN, NaiveDate::MIN));
         json!({
@@ -41,6 +42,7 @@ impl WebEngine {
             "routes": e.tt.route_info.len(),
             "walk_nodes": e.walk.node_count(),
             "bbox": [b.min_lon, b.min_lat, b.max_lon, b.max_lat],
+            "walk_bbox": [w.min_lon, w.min_lat, w.max_lon, w.max_lat],
             "center": [c.1, c.0],
             "first_date": first.to_string(),
             "last_date": last.to_string(),
@@ -78,8 +80,12 @@ impl WebEngine {
     }
 
     /// The journey to a point, as JSON, for the most recent `isochrone` call's
-    /// origin, date and time. Err if unreached or if nothing has been routed.
+    /// origin, date and time. Err if the point has no street near it, if it is
+    /// unreached, or if nothing has been routed; the first says so in its own words.
     pub fn itinerary(&self, to_lat: f64, to_lon: f64) -> Result<String, JsValue> {
+        if !self.engine.on_network(to_lat, to_lon, 500.0) {
+            return Err(err("destination is off the walking network"));
+        }
         match self.query.itinerary(to_lat, to_lon, 500.0) {
             Some(it) => serde_json::to_string(&it).map_err(err),
             None => Err(err("not reachable within the budget")),

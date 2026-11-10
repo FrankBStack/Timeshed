@@ -55,6 +55,7 @@ pub async fn serve(engine: Engine, web_dir: PathBuf, addr: SocketAddr) -> Result
 async fn info(State(app): State<App>) -> Json<serde_json::Value> {
     let e = app.engine;
     let b = e.tt.bbox();
+    let w = &e.walk.bbox;
     let c = e.tt.centroid();
     let (first, last) = e.tt.services.date_range().unwrap_or((NaiveDate::MIN, NaiveDate::MIN));
     Json(json!({
@@ -63,6 +64,7 @@ async fn info(State(app): State<App>) -> Json<serde_json::Value> {
         "routes": e.tt.route_info.len(),
         "walk_nodes": e.walk.node_count(),
         "bbox": [b.min_lon, b.min_lat, b.max_lon, b.max_lat],
+        "walk_bbox": [w.min_lon, w.min_lat, w.max_lon, w.max_lat],
         "center": [c.1, c.0],
         "first_date": first.to_string(),
         "last_date": last.to_string(),
@@ -162,7 +164,8 @@ struct ItineraryParams {
 }
 
 /// The journey from (lat, lon) to (to_lat, to_lon): re-runs the query (it is
-/// cheap) and reconstructs. 404 if the destination is out of reach.
+/// cheap) and reconstructs. 404 if the destination has no street near it or
+/// is out of reach; the body says which.
 async fn itinerary(State(app): State<App>, Params(p): Params<ItineraryParams>) -> Result<impl IntoResponse, ApiError> {
     let depart = parse_time(&p.time).map_err(|e| bad(e.to_string()))?.ok_or_else(|| bad("time is required"))?;
     let opts = QueryOpts { date: p.date, depart, max_secs: p.max * 60, walk_speed_mps: p.walk_speed, ..Default::default() };
@@ -171,6 +174,9 @@ async fn itinerary(State(app): State<App>, Params(p): Params<ItineraryParams>) -
         with_query(engine, |q| {
             if !q.run(p.lat, p.lon, &opts) {
                 return Err(bad("origin is too far from the walking network"));
+            }
+            if !engine.on_network(p.to_lat, p.to_lon, 500.0) {
+                return Err((StatusCode::NOT_FOUND, "destination is off the walking network".to_string()));
             }
             q.itinerary(p.to_lat, p.to_lon, 500.0)
                 .ok_or((StatusCode::NOT_FOUND, "destination is not reachable within the budget".to_string()))

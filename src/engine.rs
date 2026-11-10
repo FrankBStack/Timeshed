@@ -147,6 +147,11 @@ impl Engine {
     pub fn index(&self) -> &WalkIndex {
         self.index.as_ref().expect("index is built on load")
     }
+
+    /// Whether a point has a walkable edge within `max_m`.
+    pub fn on_network(&self, lat: f64, lon: f64, max_m: f64) -> bool {
+        self.index().snap(&self.walk, lat, lon, max_m).is_some()
+    }
 }
 
 fn reverse_map(stop_anchors: &[[(u32, f32); 2]]) -> HashMap<u32, Vec<u32>> {
@@ -263,11 +268,11 @@ impl<'a> Query<'a> {
     }
 
     /// Door-to-door one-to-all search from a point. Returns false if the
-    /// point is too far from the walking network.
+    /// point is too far from the walking network; the previous run is then
+    /// left as it was, so a map can keep showing it and asking it for journeys.
     pub fn run(&mut self, lat: f64, lon: f64, opts: &QueryOpts) -> bool {
         let e = self.engine;
         let Some(origin) = e.index().snap(&e.walk, lat, lon, opts.origin_snap_max_m) else {
-            self.origin = None;
             return false;
         };
         self.origin = Some(origin);
@@ -450,6 +455,32 @@ mod tests {
     fn tiny_engine() -> Engine {
         let walk = WalkGraph { lat: vec![43.0], lon: vec![-87.9], offsets: vec![0, 0], targets: vec![], lengths: vec![], bbox: BBox::empty() };
         Engine::build("tiny".into(), Timetable::default(), walk, BuildOpts::default())
+    }
+
+    /// Two nodes 100 m apart joined by one street, and no transit.
+    fn street_engine() -> Engine {
+        let (lat, lon) = (vec![43.0f32, 43.0009], vec![-87.9f32, -87.9]);
+        let mut bbox = BBox::empty();
+        for i in 0..2 {
+            bbox.include(lon[i] as f64, lat[i] as f64);
+        }
+        let walk = WalkGraph { lat, lon, offsets: vec![0, 1, 2], targets: vec![1, 0], lengths: vec![100.0, 100.0], bbox };
+        Engine::build("street".into(), Timetable::default(), walk, BuildOpts::default())
+    }
+
+    #[test]
+    fn an_origin_off_the_network_leaves_the_last_run_in_place() {
+        let e = street_engine();
+        assert!(e.on_network(43.0004, -87.9, 500.0));
+        assert!(!e.on_network(44.0, -87.9, 500.0));
+        let mut q = Query::new(&e);
+        let opts = QueryOpts::default();
+        assert!(q.run(43.0, -87.9, &opts));
+        let far_end = q.node_secs(1).expect("100 m is in reach");
+        assert!(far_end > 0);
+        assert!(!q.run(44.0, -87.9, &opts), "a degree north has no street within 500 m");
+        assert!(q.origin().is_some());
+        assert_eq!(q.node_secs(1), Some(far_end));
     }
 
     #[test]
