@@ -118,6 +118,10 @@ summary { cursor: pointer; color: var(--ink); font-weight: 500; }
 .tip td { padding: 1px 8px 1px 0; color: var(--ink-2); }
 .tip td:last-child { text-align: right; color: var(--ink); }
 .tip tr.cur td { font-weight: 600; color: var(--ink); }
+.toast { position: absolute; top: 66px; left: 384px; right: 60px; width: fit-content; max-width: 330px; z-index: 4; pointer-events: none;
+  background: var(--ink); color: var(--surface-solid); border-radius: 10px; padding: 8px 12px; font-size: 13px; line-height: 1.4; box-shadow: var(--shadow);
+  opacity: 0; visibility: hidden; transform: translateY(-4px); transition: opacity .18s, transform .18s, visibility .18s; }
+.toast.show { opacity: 1; visibility: visible; transform: none; }
 .maplibregl-marker { cursor: grab; }
 .maplibregl-ctrl-top-right { top: 60px; }
 
@@ -127,4 +131,5 @@ summary { cursor: pointer; color: var(--ink); font-weight: 500; }
   #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-width: none; max-height: 56vh; border-radius: var(--radius) var(--radius) 0 0;
     padding: 14px 16px calc(14px + env(safe-area-inset-bottom)); }
   .field.two { grid-template-columns: 1fr; }
+  .toast { left: 12px; }
 }

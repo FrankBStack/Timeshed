@@ -53,6 +53,26 @@ try {
   await page.click('#trip-close');
   if (await until(() => document.querySelector('#trip').hidden, 3000)) ok('journey card closes'); else fail('journey card did not close');
 
+  // a pin dropped far off the network comes back, and what was on the map stays
+  const toastText = () => page.$eval('#toast', (el) => (el.classList.contains('show') ? el.textContent : ''));
+  await page.evaluate(() => { const m = window.timeshed.marker, p = m.getLngLat(); m.fire('dragstart'); m.setLngLat([p.lng + 3, p.lat]); m.fire('dragend'); });
+  await new Promise((r) => setTimeout(r, 1200));
+  const back = await pinAt();
+  const kept = await page.evaluate(() => window.timeshed.map.getSource('iso').serialize().data.features.length);
+  if (near(back, -87.91, 43.0389) && /went back/.test(await toastText()) && kept > 0 && /stops reachable/.test(await stats()) && /lat=43\.0389/.test(page.url())) {
+    ok('a pin off the network goes back and says so');
+  } else fail(`off-network pin: marker at ${back.map((v) => v.toFixed(4))}, toast "${await toastText()}", ${kept} bands, stats "${await stats()}", url ${page.url()}`);
+  // the engine still answers for the run on screen
+  await page.mouse.click(700, 300);
+  if (await until(() => !document.querySelector('#trip').hidden && document.querySelectorAll('#trip-legs li').length >= 1, 20000)) ok('journeys still work after it');
+  else fail('no journey after an off-network pin');
+  // a destination out in the lake is not a journey and leaves the last one alone
+  await page.mouse.click(1150, 400);
+  if (await until(() => /nowhere to route/.test(document.querySelector('#toast.show')?.textContent || ''), 5000)
+      && await page.$$eval('#trip-legs li', (els) => els.length) >= 1) ok('a destination off the network says so');
+  else fail(`off-network destination: toast "${await toastText()}", card "${await page.$eval('#trip-title', (el) => el.textContent)}"`);
+  await page.click('#trip-close');
+
   await page.click('#tabs button[data-mode="findings"]');
   if (await until(() => document.querySelectorAll('#tiles .tile').length === 4, 30000)) ok('findings tiles rendered'); else fail('findings tiles missing');
   if (await until(() => !document.querySelector('#findings').hidden && document.querySelector('#explore').hidden, 5000)) ok('findings panel shown'); else fail('panel state wrong after switching to findings');
@@ -104,6 +124,12 @@ try {
     const expected = await page.evaluate((k) => window.TIMESHED.cities[k].center[0], cityKeys[1]);
     if (Math.abs(lng - expected) < 0.3) ok(`/${cityKeys[1]}/findings/ opens on ${cityKeys[1]}`); else fail(`/${cityKeys[1]}/findings/ opened at lng ${lng.toFixed(2)}, expected ${expected}`);
   }
+
+  // a link whose pin is nowhere near the city starts from the centre and says so
+  await page.goto(`${base}/${cityKeys[0]}/#lat=10&lon=10&t=480`, { waitUntil: 'networkidle0', timeout: 120000 });
+  if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent) && /outside/.test(document.querySelector('#toast.show')?.textContent || ''), 120000)
+      && Math.abs((await pinAt())[1] - 10) > 1) ok('a link with a pin off the network starts from the centre');
+  else fail(`bad link pin: marker at ${(await pinAt()).map((v) => v.toFixed(4))}, toast "${await toastText()}", stats "${await stats()}"`);
 
   const res = await fetch(base + '/live/');
   if (res.ok && /url=\.\.\//.test(await res.text())) ok('/live/ redirects'); else fail('/live/ redirect missing');

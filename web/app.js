@@ -49,6 +49,7 @@ const state = {
   mode: null, map: null, firstSymbol: undefined, city: null,
   // explore
   lat: null, lon: null, cityOfPin: null, lastFlownCity: null, marker: null, info: null, exploreReady: false,
+  good: null, // where the pin last routed from: {lat, lon, city}
   inFlight: false, queued: false, consented: false,
   // findings
   window: null, share: false, findingsLoaded: false, findingsWired: false, findingsCity: null, hovered: null,
@@ -70,10 +71,25 @@ const checked = (name) => (document.querySelector(`input[name="${name}"]:checked
 function check(name, value) { const el = document.querySelector(`input[name="${name}"][value="${value}"]`); if (el) el.checked = true; }
 const fmtInt = (n) => Math.round(n).toLocaleString();
 const pctFmt = (v) => Math.round(v * 100) + '%';
+// A short line over the map for things that did not happen: a pin or a
+// destination with no street near it. Gone after a few seconds or on the next move.
+let toastTimer = 0;
+function hideToast() { clearTimeout(toastTimer); $('toast').classList.remove('show'); }
+function toast(text) {
+  $('toast').textContent = text;
+  $('toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 6000);
+}
 function setVisible(id, on) { if (state.map.getLayer(id)) state.map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none'); }
 function firstSymbolLayer(map) { const l = map.getStyle().layers.find((x) => x.type === 'symbol'); return l ? l.id : undefined; }
 
 // --------------------------------------------------------------- backend --
+// Two answers the engine gives in words and the page acts on. An itinerary
+// that cannot be drawn comes back as {miss: 'off'} (no street near the point)
+// or {miss: 'far'} (not reachable in the budget).
+const OFF_NETWORK_ORIGIN = /too far from the walking network/;
+const OFF_NETWORK_DEST = /off the walking network/;
 function httpBackend() {
   return {
     async info() { return (await fetch('/api/info')).json(); },
@@ -85,7 +101,7 @@ function httpBackend() {
     },
     async itinerary(params, to) {
       const res = await fetch('/api/itinerary?' + new URLSearchParams({ ...params, to_lat: to.lat, to_lon: to.lon }).toString());
-      if (res.status === 404) return null;
+      if (res.status === 404) return { miss: OFF_NETWORK_DEST.test(await res.text()) ? 'off' : 'far' };
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
@@ -143,7 +159,11 @@ function wasmBackend(bundleUrl, pkgUrl, workerUrl) {
       await ready;
       const id = nextId++;
       return new Promise((resolve, reject) => {
-        waiting.set(id, { resolve, reject: (e) => (/not reachable/.test(e.message) ? resolve(null) : reject(e)) });
+        waiting.set(id, { resolve, reject: (e) => {
+          if (OFF_NETWORK_DEST.test(e.message)) resolve({ miss: 'off' });
+          else if (/not reachable/.test(e.message)) resolve({ miss: 'far' });
+          else reject(e);
+        } });
         worker.postMessage({ type: 'itinerary', id, to_lat: to.lat, to_lon: to.lon });
       });
     },
@@ -262,7 +282,8 @@ async function tripTo(lngLat) {
   const params = { lat: state.lat, lon: state.lon, date, time: timeParam(+$('time').value), max: MAX, band: BAND };
   try {
     const it = await getBackend().itinerary(params, { lat: lngLat.lat, lon: lngLat.lng });
-    if (!it) {
+    if (it.miss === 'off') { toast('No streets near that spot, so there is nowhere to route to.'); return; }
+    if (it.miss) {
       lastTrip = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: { kind: 'end' }, geometry: { type: 'Point', coordinates: [lngLat.lng, lngLat.lat] } }] };
       state.map.getSource('trip').setData(lastTrip);
       $('trip-title').textContent = `Not reachable within ${MAX} min from the pin`;
@@ -328,6 +349,7 @@ async function exploreInit() {
   buildTicks();
   ensureExploreLayers();
   state.marker = new maplibregl.Marker({ draggable: true, color: '#d9452b' });
+  state.marker.on('dragstart', () => { cancelAnimationFrame(glide); hideToast(); });
   state.marker.on('dragend', () => { const p = state.marker.getLngLat(); state.lon = p.lng; state.lat = p.lat; exploreQuery(); });
   $('time').addEventListener('input', () => { $('time-out').textContent = timeLabel(+$('time').value); exploreQuery(); });
   $('day').addEventListener('change', exploreQuery);
@@ -354,6 +376,7 @@ async function exploreLoadCity() {
   state.info = info;
   $('feed').textContent = `${info.name} · ${info.stops.toLocaleString()} stops · ${info.walk_nodes.toLocaleString()} walking nodes`;
   if (state.lat === null || state.cityOfPin !== state.city) { state.lon = info.center[0]; state.lat = info.center[1]; }
+  if (state.good && state.good.city !== state.city) state.good = null;
   state.cityOfPin = state.city;
   state.marker.setLngLat([state.lon, state.lat]);
   exploreShow(state.mode === 'explore');
@@ -369,20 +392,57 @@ function exploreShow(on) {
   if (state.marker) { if (on) state.marker.addTo(state.map); else state.marker.remove(); }
 }
 
+// The pin slides rather than jumps when the page moves it.
+let glide = 0;
+function glidePin(from, to) {
+  cancelAnimationFrame(glide);
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { state.marker.setLngLat(to); return; }
+  const t0 = performance.now(), ms = 320;
+  const step = (now) => {
+    const k = Math.min(1, Math.max(0, (now - t0) / ms)), e = 1 - (1 - k) ** 3;
+    state.marker.setLngLat([from[0] + (to[0] - from[0]) * e, from[1] + (to[1] - from[1]) * e]);
+    if (k < 1) glide = requestAnimationFrame(step);
+  };
+  glide = requestAnimationFrame(step);
+}
+
+// A pin dropped where there are no streets goes back to where it last routed
+// from, and what is on the map stays. One that never routed, such as a link's
+// pin, starts from the centre instead. False if there is nowhere better to go.
+function pinBack(at) {
+  if (state.lat !== at.lat || state.lon !== at.lon) return true; // moved again since; that query is queued
+  const c = state.info.center;
+  const home = state.good && state.good.city === state.city ? state.good : { lat: c[1], lon: c[0] };
+  if (home.lat === at.lat && home.lon === at.lon) return false;
+  state.lat = home.lat; state.lon = home.lon;
+  if (home === state.good) {
+    glidePin([at.lon, at.lat], [home.lon, home.lat]);
+    toast('No streets near that spot, so the pin went back to where it was.');
+  } else {
+    state.marker.setLngLat([home.lon, home.lat]);
+    toast(`That pin is outside the ${cityCfg().name || state.info.name} network, so this starts from the centre.`);
+    state.queued = true;
+  }
+  return true;
+}
+
 // One query in flight at a time; a change while routing is answered once
-// the current one lands, so scrubbing never builds a backlog.
+// the current one lands, so scrubbing never builds a backlog. The address
+// only takes a pin once it has routed.
 async function exploreQuery() {
   if (state.inFlight) { state.queued = true; return; }
   state.inFlight = true;
-  writeHash();
   const info = state.info;
+  const at = { lat: state.lat, lon: state.lon, city: state.city };
   const date = pickDate(checked('day'), new Date(info.first_date), new Date(info.last_date));
-  const params = { lat: state.lat, lon: state.lon, date, time: timeParam(+$('time').value), max: MAX, band: BAND };
+  const params = { lat: at.lat, lon: at.lon, date, time: timeParam(+$('time').value), max: MAX, band: BAND };
   $('error').hidden = true;
   if (state.map.getLayer('iso-fill')) state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.35);
-  clearTrip();
   try {
     const { fc, note } = await getBackend().isochrone(params);
+    clearTrip();
+    state.good = at;
+    writeHash();
     lastIso = fc;
     state.map.getSource('iso').setData(fc);
     state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.58);
@@ -390,10 +450,18 @@ async function exploreQuery() {
     $('stats').textContent = `${(p.stops_by_transit || 0).toLocaleString()} stops reachable within ${MAX} min · ${note}`;
     $('date-note').textContent = `Routing on ${prettyDate(date)}, the next ${checked('day')} in the feed's ${info.first_date} to ${info.last_date} range.`;
   } catch (err) {
-    $('stats').textContent = '';
-    $('error').textContent = err.message;
-    $('error').hidden = false;
-    state.map.getSource('iso').setData({ type: 'FeatureCollection', features: [] });
+    if (OFF_NETWORK_ORIGIN.test(err.message) && pinBack(at)) {
+      // the engine still holds the last run, and so does the map
+      if (state.good) state.map.setPaintProperty('iso-fill', 'fill-opacity', 0.58);
+    } else {
+      state.good = null;
+      clearTrip();
+      $('stats').textContent = '';
+      $('error').textContent = err.message;
+      $('error').hidden = false;
+      lastIso = { type: 'FeatureCollection', features: [] };
+      state.map.getSource('iso').setData(lastIso);
+    }
   } finally {
     state.inFlight = false;
     if (state.queued) { state.queued = false; exploreQuery(); }
@@ -605,6 +673,7 @@ function init() {
   map.on('click', (e) => {
     if (state.mode !== 'explore' || !state.marker) return;
     if (e.originalEvent.target.closest('#panel, #bar')) return;
+    hideToast();
     tripTo(e.lngLat);
   });
   $('trip-close').addEventListener('click', clearTrip);
