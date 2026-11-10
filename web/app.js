@@ -320,7 +320,10 @@ async function exploreInit() {
   if (h.has('t')) $('time').value = h.get('t');
   if (h.has('day')) check('day', h.get('day'));
   if (h.has('m')) check('cutoff', h.get('m'));
-  if (h.has('lat') && h.has('lon')) { state.lat = parseFloat(h.get('lat')); state.lon = parseFloat(h.get('lon')); }
+  // a pin in the link belongs to the city the link opened on; without that,
+  // the first load looked like a change of city and reset it to the centre
+  const lat = parseFloat(h.get('lat')), lon = parseFloat(h.get('lon'));
+  if (Number.isFinite(lat) && Number.isFinite(lon)) { state.lat = lat; state.lon = lon; state.cityOfPin = state.city; }
   $('time-out').textContent = timeLabel(+$('time').value);
   buildTicks();
   ensureExploreLayers();

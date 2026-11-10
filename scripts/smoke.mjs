@@ -39,6 +39,11 @@ try {
   await page.goto(base + '/#lat=43.0389&lon=-87.91&t=480', { waitUntil: 'networkidle0', timeout: 120000 });
   if (await until(() => /stops reachable/.test(document.querySelector('#stats').textContent), 120000)) ok('explore routed: ' + await stats());
   else fail('explore did not route: ' + await stats());
+  const pinAt = () => page.evaluate(() => { const p = window.timeshed.marker.getLngLat(); return [p.lng, p.lat]; });
+  const near = (p, lon, lat) => Math.abs(p[0] - lon) < 5e-4 && Math.abs(p[1] - lat) < 5e-4;
+  const linked = await pinAt();
+  if (near(linked, -87.91, 43.0389)) ok('the pin is where the link put it');
+  else fail(`the link's pin was ignored: marker at ${linked.map((v) => v.toFixed(4))}`);
 
   // click a point a little north of the pin: a journey card with at least one leg
   await page.mouse.click(700, 300);
